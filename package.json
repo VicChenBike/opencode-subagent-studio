@@ -9,7 +9,7 @@
     "./gui-experimental": "./dist/gui-experimental.cjs"
   },
   "scripts": {
-    "test": "node --test --experimental-strip-types test/",
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "build": "vite build",
     "watch": "vite build --watch"
