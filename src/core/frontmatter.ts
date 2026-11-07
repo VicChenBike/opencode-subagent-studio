@@ -71,9 +71,9 @@ export function createV2Content(patch: AgentPatch): string {
 }
 
 // 既有文件打补丁：Document API 原地改，注释 / 键序 / 未知字段全保留（goal.md §9.3）
+// 正文由 patch.body 决定，原文件的 body 不参与，因此只解构 frontmatter。
 export function applyPatchToSource(raw: string, patch: AgentPatch): string {
-  const { frontmatter, body } = splitFrontmatter(raw)
-  void body
+  const { frontmatter } = splitFrontmatter(raw)
   const doc: Document = frontmatter === null ? new Document() : parseDocument(frontmatter)
   const existingRules = extractRules(doc)
   // description（必填）

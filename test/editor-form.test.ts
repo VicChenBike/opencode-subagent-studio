@@ -2,7 +2,7 @@
 // GUI 组件本身无法在 node --test 里渲染，把可判定的逻辑抽出来单测。
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { splitModelRef, buildPatch, optionalFieldsOf, validateEditor, patchFromRead } from "../src/gui/editor-form.ts"
+import { splitModelRef, buildPatch, optionalFieldsOf, validateEditor, patchFromRead, conflictAction } from "../src/gui/editor-form.ts"
 import type { ReadOutput } from "../src/rpc.ts"
 
 const MATRIX = {
@@ -106,4 +106,12 @@ test("patchFromRead reads a v1 permission map", () => {
   const patch = patchFromRead(res)
   assert.equal(patch.matrix.actions.read, "allow")
   assert.equal(patch.matrix.actions.edit, "deny")
+})
+
+// 中期审查 P2-1：冲突弹窗选「重新加载」后必须离开编辑页。
+// 否则页面停留在旧 hash 上，再点保存必然再次冲突。
+test("conflictAction sends reload back to the list and only overwrite stays", () => {
+  assert.equal(conflictAction("reload"), "back")
+  assert.equal(conflictAction(undefined), "back", "dismissing the dialog must also leave")
+  assert.equal(conflictAction("overwrite"), "overwrite")
 })

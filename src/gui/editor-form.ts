@@ -127,3 +127,13 @@ export function patchFromRead(res: ReadOutput): AgentPatch {
   if (typeof meta.steps === "number") patch.steps = meta.steps
   return patch
 }
+
+/**
+ * 冲突弹窗的三种结果如何落地（goal.md §12.3）：
+ * - overwrite：带 force 再写一次
+ * - reload / 取消（undefined）：返回列表重新进入。
+ *   绝不能停在旧 hash 的编辑页，否则用户再点保存会立刻再次冲突。
+ */
+export function conflictAction(choice: "reload" | "overwrite" | undefined): "back" | "overwrite" {
+  return choice === "overwrite" ? "overwrite" : "back"
+}

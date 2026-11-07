@@ -1,7 +1,6 @@
 // src/index.ts —— 服务端部分（Node 环境，随桌面端服务进程运行）。
 // 改动本文件后必须重启 OpenCode Desktop 才生效（AGENTS.md §4.7）。
 import { Plugin } from "@opencode/plugin"
-import fs from "node:fs/promises"
 import path from "node:path"
 import { Subagents, ACTIONS } from "./rpc.ts"
 import type {
@@ -12,6 +11,7 @@ import type {
 import {
   userAgentsDir, projectAgentsDir, listAgents, readAgentFile, assertAllowedPath,
   createAgentFile, updateAgentFile, setDisabledFile, renameAgentFile, trashAgentFile,
+  previewMigrationFile,
 } from "./core/agent-store.ts"
 import { migratePreview } from "./core/frontmatter.ts"
 
@@ -146,8 +146,8 @@ export default Plugin.define({
       migratePreview: async (input): Promise<MigratePreviewOutput> => {
         const q = input as { path: string }
         assertAllowedPath(q.path, [userAgentsDir()], "read")
-        const raw = await fs.readFile(q.path, "utf8")
-        return migratePreview(raw)
+        // 文件缺失映射为契约错误码 not_found（中期审查 P3-2）
+        return await previewMigrationFile({ filePath: q.path })
       },
 
       watchProject: async () => notImplemented(),     // P3-T2

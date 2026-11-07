@@ -139,6 +139,7 @@ test("listAgents still scans nested subdirectories and applies the mode filter t
 // ---------- P2-T4：写操作 ----------
 import {
   createAgentFile, updateAgentFile, setDisabledFile, renameAgentFile, trashAgentFile, readAgentFile,
+  previewMigrationFile,
 } from "../src/core/agent-store.ts"
 import type { AgentPatch } from "../src/rpc.ts"
 
@@ -292,4 +293,27 @@ test("listAgents still surfaces a malformed file rather than dropping valid ones
   fs.writeFileSync(path.join(dir, "weird.md"), "---\n- a\n- b\n---\n\nx\n")
   const list = await listAgents(dir)
   assert.deepEqual(list.map((a) => a.id), ["ok"])
+})
+
+// 中期审查 P3-2：migratePreview 读不到文件时必须映射成契约错误码 not_found，
+// 而不是把 ENOENT 直接抛成 500。
+test("previewMigrationFile reports not_found for a missing file", async () => {
+  const dir = path.join(tmp, "agents")
+  fs.mkdirSync(dir, { recursive: true })
+  await assert.rejects(
+    () => previewMigrationFile({ filePath: path.join(dir, "nope.md") }),
+    (e: Error & { code?: string }) => e.code === "not_found",
+  )
+})
+
+test("previewMigrationFile returns before/after/changes for a v1 file", async () => {
+  const dir = path.join(tmp, "agents")
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, "legacy.md")
+  fs.writeFileSync(file, "---\nname: legacy\ndescription: d\nmode: subagent\npermission:\n  read: allow\n---\n\nb\n")
+  const res = await previewMigrationFile({ filePath: file })
+  assert.ok(res.before.includes("name: legacy"))
+  assert.ok(!res.after.includes("name:"))
+  assert.ok(res.after.includes("permissions:"))
+  assert.ok(res.changes.some((c) => c.field === "name"))
 })

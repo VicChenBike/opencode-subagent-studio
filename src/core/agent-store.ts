@@ -6,10 +6,12 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
 import { parseDocument, Document } from "yaml"
-import { parseAgentFile, createV2Content, applyPatchToSource, migrateContent, splitFrontmatter } from "./frontmatter.ts"
+import {
+  parseAgentFile, createV2Content, applyPatchToSource, migrateContent, splitFrontmatter, migratePreview,
+} from "./frontmatter.ts"
 import { matrixFromRules } from "./permissions.ts"
 import { isValidAgentId, isReservedId } from "./ids.ts"
-import type { AgentPatch, PermissionMatrix } from "../rpc.ts"
+import type { AgentPatch, MigrateChange, PermissionMatrix } from "../rpc.ts"
 
 export function userAgentsDir(): string {
   return path.join(os.homedir(), ".config", "opencode", "agents")
@@ -292,4 +294,13 @@ export async function trashAgentFile(params: {
   const target = path.join(trash, `${timestampStamp()}-${path.basename(params.filePath)}`)
   await fs.rename(params.filePath, target)
   return { trashPath: target }
+}
+
+// ---------- 迁移预览（P2-T8 / 中期审查 P3-2） ----------
+// 读文件失败必须映射成契约错误码 not_found，而不是把 ENOENT 抛成 500。
+export async function previewMigrationFile(params: {
+  filePath: string
+}): Promise<{ before: string; after: string; changes: MigrateChange[] }> {
+  const raw = await readRaw(params.filePath)
+  return migratePreview(raw)
 }

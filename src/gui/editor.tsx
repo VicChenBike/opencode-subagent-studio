@@ -176,6 +176,9 @@ export function EditorPage(props: {
         await ctx.client.rpc(Subagents).update({ path: pathArg, expectedHash: hash()!, patch: currentPatch(), force: true })
         return "saved"
       }
+      // P2-1：选「重新加载」或取消弹窗都必须离开编辑页。
+      // 停在旧 hash 的页面上再保存会立刻再次冲突。
+      props.onBack()
       return "reloaded"
     }
   }
