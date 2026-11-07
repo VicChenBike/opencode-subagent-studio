@@ -135,3 +135,161 @@ test("listAgents still scans nested subdirectories and applies the mode filter t
   const list = await listAgents(dir)
   assert.deepEqual(list.map((a) => a.id), ["team/reviewer"])
 })
+
+// ---------- P2-T4：写操作 ----------
+import {
+  createAgentFile, updateAgentFile, setDisabledFile, renameAgentFile, trashAgentFile, readAgentFile,
+} from "../src/core/agent-store.ts"
+import type { AgentPatch } from "../src/rpc.ts"
+
+const MATRIX = {
+  defaultEffect: "allow",
+  actions: { read: "allow", glob: "allow", grep: "allow", edit: "allow", shell: "allow",
+    webfetch: "allow", websearch: "allow", skill: "allow", subagent: "allow", question: "allow" },
+} as const
+
+test("createAgentFile writes v2 file and no-clobbers", async () => {
+  const dir = path.join(tmp, "agents")
+  fs.mkdirSync(dir, { recursive: true })
+  const p = await createAgentFile({ dir, id: "reviewer", description: "d", body: "b\n", matrix: MATRIX })
+  assert.equal(p, path.join(dir, "reviewer.md"))
+  const raw = fs.readFileSync(p, "utf8")
+  assert.ok(raw.startsWith("---\ndescription: d\nmode: subagent"))
+  assert.ok(!raw.includes("name:"))
+  // no-clobber：存在即拒绝
+  await assert.rejects(
+    () => createAgentFile({ dir, id: "reviewer", description: "d2", body: "b\n", matrix: MATRIX }),
+    (e: Error & { code?: string }) => e.code === "exists",
+  )
+  // 非法 ID 拒绝
+  await assert.rejects(
+    () => createAgentFile({ dir, id: "Bad_Id", description: "d", body: "b\n", matrix: MATRIX }),
+    (e: Error & { code?: string }) => e.code === "invalid_id",
+  )
+  await assert.rejects(
+    () => createAgentFile({ dir, id: "general", description: "d", body: "b\n", matrix: MATRIX }),
+    (e: Error & { code?: string }) => e.code === "reserved_id",
+  )
+})
+
+test("updateAgentFile conflicts on hash mismatch and supports force with backup", async () => {
+  const dir = path.join(tmp, "agents")
+  fs.mkdirSync(dir, { recursive: true })
+  const filePath = await createAgentFile({ dir, id: "reviewer", description: "d", body: "b\n", matrix: MATRIX })
+  const patch: AgentPatch = { description: "d2", body: "b2\n", matrix: MATRIX }
+  // 旧 hash → conflict
+  await assert.rejects(
+    () => updateAgentFile({ filePath, roots: [dir], expectedHash: "deadbeefdeadbeef", patch }),
+    (e: Error & { code?: string }) => e.code === "conflict",
+  )
+  // force = 备份到 agents-trash/.backup-*，再写入
+  const { hash } = await updateAgentFile({ filePath, roots: [dir], expectedHash: "deadbeefdeadbeef", patch, force: true })
+  const trash = trashDirFor(dir)
+  const backups = fs.readdirSync(trash).filter((f) => f.startsWith(".backup-"))
+  assert.equal(backups.length, 1)
+  assert.ok(fs.readFileSync(path.join(trash, backups[0]), "utf8").includes("description: d\n"))
+  const second = await readAgentFile(filePath)
+  assert.equal(second.hash, hash)
+  assert.equal((second.meta as { description: string }).description, "d2")
+})
+
+test("setDisabledFile toggles disabled and returns new hash", async () => {
+  const dir = path.join(tmp, "agents")
+  fs.mkdirSync(dir, { recursive: true })
+  const filePath = await createAgentFile({ dir, id: "reviewer", description: "d", body: "b\n", matrix: MATRIX })
+  const off = await setDisabledFile({ filePath, roots: [dir], disabled: true })
+  const meta = (await readAgentFile(filePath)).meta as Record<string, unknown>
+  assert.equal(meta.disabled, true)
+  const on = await setDisabledFile({ filePath, roots: [dir], disabled: false })
+  const meta2 = (await readAgentFile(filePath)).meta as Record<string, unknown>
+  assert.ok(!("disabled" in meta2)) // false = 删除字段（goal.md §10）
+  assert.notEqual(off.hash, on.hash)
+  // V1 文件：拒绝直接写 disabled（必须走迁移预览，goal.md §5.3）
+  fs.writeFileSync(path.join(dir, "legacy.md"), "---\ndescription: d\nmode: subagent\n---\n\nb\n")
+  await assert.rejects(
+    () => setDisabledFile({ filePath: path.join(dir, "legacy.md"), roots: [dir], disabled: true }),
+    (e: Error & { code?: string }) => e.code === "migration_required",
+  )
+})
+
+test("renameAgentFile moves file, rejects duplicates and reserved ids", async () => {
+  const dir = path.join(tmp, "agents")
+  fs.mkdirSync(dir, { recursive: true })
+  const filePath = await createAgentFile({ dir, id: "old-name", description: "d", body: "b\n", matrix: MATRIX })
+  const renamed = await renameAgentFile({ filePath, roots: [dir], newId: "new-name" })
+  assert.ok(fs.existsSync(path.join(dir, "new-name.md")))
+  assert.ok(!fs.existsSync(filePath))
+  await assert.rejects(
+    () => renameAgentFile({ filePath: renamed.path, roots: [dir], newId: "new-name" }),
+    (e: Error & { code?: string }) => e.code === "exists",
+  )
+  await assert.rejects(
+    () => renameAgentFile({ filePath: renamed.path, roots: [dir], newId: "general" }),
+    (e: Error & { code?: string }) => e.code === "reserved_id",
+  )
+})
+
+test("renameAgentFile drops name field from v1 files (goal.md §6.1)", async () => {
+  const dir = path.join(tmp, "agents")
+  fs.mkdirSync(dir, { recursive: true })
+  const legacy = path.join(dir, "legacy.md")
+  fs.writeFileSync(legacy, "---\nname: legacy\ndescription: d\nmode: subagent\n---\n\nb\n")
+  const { path: newPath } = await renameAgentFile({ filePath: legacy, roots: [dir], newId: "renamed" })
+  const raw = fs.readFileSync(newPath, "utf8")
+  assert.ok(!raw.includes("name:"))
+})
+
+test("trashAgentFile moves into sibling agents-trash with timestamp name", async () => {
+  const dir = path.join(tmp, "agents")
+  fs.mkdirSync(dir, { recursive: true })
+  const filePath = path.join(dir, "victim.md")
+  fs.writeFileSync(filePath, "---\ndescription: v\nmode: subagent\n---\n\nb\n")
+  const { trashPath } = await trashAgentFile({ filePath, roots: [dir] })
+  assert.ok(!fs.existsSync(filePath))
+  const name = path.basename(trashPath)
+  assert.match(name, /^\d{8}-\d{6}-victim\.md$/)
+  assert.equal(fs.readFileSync(trashPath, "utf8").includes("description: v"), true)
+  // 回收站绝不位于 agents/ 内（坑 6）
+  assert.ok(!trashPath.startsWith(dir + path.sep))
+  // 不存在文件 → not_found
+  await assert.rejects(
+    () => trashAgentFile({ filePath, roots: [dir] }),
+    (e: Error & { code?: string }) => e.code === "not_found",
+  )
+})
+
+// R1 遗留：扫描期间单文件被删不应让整次列表失败（读取竞态）
+test("listAgents skips a file that disappears mid-scan instead of failing the whole list", async () => {
+  const dir = path.join(tmp, "agents")
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, "stable.md"), "---\ndescription: S\nmode: subagent\n---\n\nx\n")
+  const vanishing = path.join(dir, "vanishing.md")
+  fs.writeFileSync(vanishing, "---\ndescription: V\nmode: subagent\n---\n\nx\n")
+
+  const { mock } = await import("node:test")
+  const fsp = (await import("node:fs/promises")).default
+  const original = fsp.readFile
+  mock.method(fsp, "readFile", async (p: unknown, ...rest: unknown[]) => {
+    if (String(p).endsWith("vanishing.md")) {
+      const err = new Error("ENOENT: vanished") as Error & { code: string }
+      err.code = "ENOENT"
+      throw err
+    }
+    return (original as (...a: unknown[]) => Promise<unknown>)(p, ...rest)
+  })
+  try {
+    const list = await listAgents(dir)
+    assert.deepEqual(list.map((a) => a.id), ["stable"])
+  } finally {
+    mock.restoreAll()
+  }
+})
+
+test("listAgents still surfaces a malformed file rather than dropping valid ones", async () => {
+  const dir = path.join(tmp, "agents")
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, "ok.md"), "---\ndescription: O\nmode: subagent\n---\n\nx\n")
+  fs.writeFileSync(path.join(dir, "weird.md"), "---\n- a\n- b\n---\n\nx\n")
+  const list = await listAgents(dir)
+  assert.deepEqual(list.map((a) => a.id), ["ok"])
+})

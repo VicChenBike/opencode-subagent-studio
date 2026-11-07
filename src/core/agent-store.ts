@@ -1,11 +1,15 @@
 // src/core/agent-store.ts —— 目录推导、路径白名单、扫描、读取、写入、改名、回收站
-// P1 版：推导 + 校验 + 扫描 + 读取。写入 / 改名 / 回收站在 P2-T4、P3-T1 补齐。
+// 唯一 IO 模块，仅服务端 import。
 import crypto from "node:crypto"
 import type { Dirent } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
-import { parseAgentFile } from "./frontmatter.ts"
+import { parseDocument, Document } from "yaml"
+import { parseAgentFile, createV2Content, applyPatchToSource, migrateContent, splitFrontmatter } from "./frontmatter.ts"
+import { matrixFromRules } from "./permissions.ts"
+import { isValidAgentId, isReservedId } from "./ids.ts"
+import type { AgentPatch, PermissionMatrix } from "../rpc.ts"
 
 export function userAgentsDir(): string {
   return path.join(os.homedir(), ".config", "opencode", "agents")
@@ -72,7 +76,14 @@ export async function listAgents(dir: string): Promise<AgentSummaryRow[]> {
     const parent = entry.parentPath ?? path.join(dir, path.dirname(entry.name))
     const file = path.join(parent, entry.name)
     const id = path.relative(dir, file).replace(/\.md$/, "").split(path.sep).join("/")
-    const content = await fs.readFile(file, "utf8")
+    // R1 遗留的扫描竞态：扫描期间文件可能被删除/改权限。
+    // 单个文件读失败只跳过该文件，不能让整次 list 失败（否则 GUI 整页空白）。
+    let content: string
+    try {
+      content = await fs.readFile(file, "utf8")
+    } catch {
+      continue
+    }
     const parsed = parseAgentFile(content)
     // goal.md §5.2：列表只显示 mode 精确等于 subagent 的文件。
     // - primary：主代理本体（如 superpowers.md），不是子代理
@@ -121,4 +132,164 @@ export async function readAgentFile(
   const parsed = parseAgentFile(content)
   const st = await statOr(filePath)
   return { meta: parsed.meta, body: parsed.body, format: parsed.format, hash: hashOf(content), mtime: st?.mtime ?? 0 }
+}
+
+// ---------- 写操作（P2-T4） ----------
+
+function fail(code: string, message: string): never {
+  const err = new Error(message) as Error & { code: string }
+  err.code = code
+  throw err
+}
+
+function assertIdUsable(id: string): void {
+  if (!isValidAgentId(id)) fail("invalid_id", `invalid agent id: ${id}`)
+  if (isReservedId(id)) fail("reserved_id", `reserved agent id: ${id}`)
+}
+
+function idToPath(dir: string, id: string): string {
+  // id 已过 ID_PATTERN（无 /、无 .），不会穿越
+  return path.join(dir, `${id}.md`)
+}
+
+async function assertWritable(filePath: string, roots: readonly string[]): Promise<void> {
+  assertAllowedPath(filePath, roots, "write")
+  await fs.mkdir(path.dirname(filePath), { recursive: true })
+}
+
+async function readRawOrNull(filePath: string): Promise<string | null> {
+  try {
+    return await fs.readFile(filePath, "utf8")
+  } catch {
+    return null
+  }
+}
+
+async function readRaw(filePath: string): Promise<string> {
+  const raw = await readRawOrNull(filePath)
+  if (raw === null) fail("not_found", `agent file not found: ${filePath}`)
+  return raw
+}
+
+export function timestampStamp(date: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+}
+
+export async function createAgentFile(params: {
+  dir: string
+  id: string
+  description: string
+  body: string
+  model?: string
+  color?: string
+  hidden?: boolean
+  steps?: number
+  matrix: PermissionMatrix
+}): Promise<string> {
+  assertIdUsable(params.id)
+  const filePath = idToPath(params.dir, params.id)
+  await assertWritable(filePath, [params.dir])
+  if ((await readRawOrNull(filePath)) !== null) {
+    fail("exists", `agent file already exists: ${filePath}`)
+  }
+  await fs.writeFile(filePath, createV2Content(params), "utf8")
+  return filePath
+}
+
+async function backupToTrash(filePath: string, agentsDir: string): Promise<string> {
+  const trash = trashDirFor(agentsDir)
+  await fs.mkdir(trash, { recursive: true })
+  const target = path.join(trash, `.backup-${timestampStamp()}-${path.basename(filePath)}`)
+  await fs.copyFile(filePath, target)
+  return target
+}
+
+export async function updateAgentFile(params: {
+  filePath: string
+  roots: readonly string[]
+  expectedHash: string
+  patch: AgentPatch
+  force?: boolean
+}): Promise<{ hash: string }> {
+  await assertWritable(params.filePath, params.roots)
+  const raw = await readRaw(params.filePath)
+  const currentHash = hashOf(raw)
+  if (currentHash !== params.expectedHash) {
+    // goal.md §12.3：不一致即 conflict，绝不静默覆盖；force 时先备份到回收站目录
+    if (!params.force) fail("conflict", `file changed on disk: ${params.filePath}`)
+    await backupToTrash(params.filePath, path.dirname(params.filePath))
+  }
+  // V1 文件保存 = 整份迁移后再打补丁（goal.md §9.1；GUI 已先弹迁移预览）
+  const base = parseAgentFile(raw).format === "v1" ? migrateContent(raw).content : raw
+  const content = applyPatchToSource(base, params.patch)
+  await fs.writeFile(params.filePath, content, "utf8")
+  return { hash: hashOf(content) }
+}
+
+export async function setDisabledFile(params: {
+  filePath: string
+  roots: readonly string[]
+  disabled: boolean
+}): Promise<{ hash: string }> {
+  await assertWritable(params.filePath, params.roots)
+  const raw = await readRaw(params.filePath)
+  const parsed = parseAgentFile(raw)
+  // goal.md §5.3：对 V1 文件写 disabled 会触发整份切 V2，必须先走迁移预览
+  if (parsed.format === "v1") {
+    fail("migration_required", "v1 file must be migrated before toggling disabled")
+  }
+  const { frontmatter, body } = splitFrontmatter(raw)
+  const doc = frontmatter === null ? new Document() : parseDocument(frontmatter)
+  if (params.disabled) doc.set("disabled", true)
+  else doc.delete("disabled")
+  const fm = doc.toString().replace(/\n$/, "")
+  const content = `---\n${fm}\n---\n\n${body}`
+  await fs.writeFile(params.filePath, content, "utf8")
+  return { hash: hashOf(content) }
+}
+
+export async function renameAgentFile(params: {
+  filePath: string
+  roots: readonly string[]
+  newId: string
+}): Promise<{ path: string }> {
+  assertIdUsable(params.newId)
+  await assertWritable(params.filePath, params.roots)
+  const dir = path.dirname(params.filePath)
+  const target = idToPath(dir, params.newId)
+  // 二次校验：目标存在即拒（不覆盖别人的文件）
+  if ((await readRawOrNull(target)) !== null) {
+    fail("exists", `target already exists: ${target}`)
+  }
+  const raw = await readRaw(params.filePath)
+  // V1 文件重命名后 name 与新文件名会不一致 → 直接删 name（goal.md §6.1）
+  const parsed = parseAgentFile(raw)
+  let content = raw
+  if (parsed.format === "v1" && "name" in parsed.meta) {
+    const { frontmatter, body } = splitFrontmatter(raw)
+    const doc = frontmatter === null ? new Document() : parseDocument(frontmatter)
+    doc.delete("name")
+    content = `---\n${doc.toString().replace(/\n$/, "")}\n---\n\n${body}`
+  }
+  if (content !== raw) await fs.writeFile(params.filePath, content, "utf8")
+  await fs.rename(params.filePath, target)
+  return { path: target }
+}
+
+// ---------- 回收站（P3-T1，goal.md §10） ----------
+export async function trashAgentFile(params: {
+  filePath: string
+  roots: readonly string[]
+}): Promise<{ trashPath: string }> {
+  await assertWritable(params.filePath, params.roots)
+  const dir = path.dirname(params.filePath)
+  const raw = await readRawOrNull(params.filePath)
+  if (raw === null) fail("not_found", `agent file not found: ${params.filePath}`)
+  const trash = trashDirFor(dir)
+  await fs.mkdir(trash, { recursive: true })
+  // 文件名：<yyyyMMdd-HHmmss>-<原名>.md（goal.md §10）
+  const target = path.join(trash, `${timestampStamp()}-${path.basename(params.filePath)}`)
+  await fs.rename(params.filePath, target)
+  return { trashPath: target }
 }

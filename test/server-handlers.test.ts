@@ -114,3 +114,50 @@ test("list output encodes rows produced from the real user agents directory shap
   const payload = { agents, builtins: [{ id: "general" as const }, { id: "explore" as const }] }
   assert.doesNotThrow(() => encodeListOutput(payload))
 }))
+
+// 写方法的输出同样必须能在「可选字段缺省」时过宿主 schema 编码。
+// 用真实文件走一遍 create / update / setDisabled / rename / remove，再编码每个返回值。
+test("write method outputs all encode through the host schemas", withTempAgents({
+  "seed.md": "---\ndescription: Seed\nmode: subagent\n---\n\nseed body\n",
+}, async (dir) => {
+  const { createAgentFile, updateAgentFile, setDisabledFile, renameAgentFile, trashAgentFile } = await import("../src/core/agent-store.ts")
+  const matrix = {
+    defaultEffect: "allow" as const,
+    actions: { read: "allow", glob: "allow", grep: "allow", edit: "allow", shell: "allow",
+      webfetch: "allow", websearch: "allow", skill: "allow", subagent: "allow", question: "allow" } as const,
+  }
+
+  const created = await createAgentFile({ dir, id: "fresh", description: "F", body: "b\n", matrix })
+  assert.doesNotThrow(() => E.Schema.encodeUnknownSync(toEffectSchema(Subagents.methods.create.output) as never)({ path: created }))
+
+  const raw = await import("node:fs/promises").then((m) => m.readFile(created, "utf8"))
+  const { hashOf } = await import("../src/core/agent-store.ts")
+  const updated = await updateAgentFile({
+    filePath: created, roots: [dir], expectedHash: hashOf(raw),
+    patch: { description: "F2", body: "b2\n", matrix },
+  })
+  assert.doesNotThrow(() => E.Schema.encodeUnknownSync(toEffectSchema(Subagents.methods.update.output) as never)(updated))
+
+  const toggled = await setDisabledFile({ filePath: created, roots: [dir], disabled: true })
+  assert.doesNotThrow(() => E.Schema.encodeUnknownSync(toEffectSchema(Subagents.methods.setDisabled.output) as never)(toggled))
+
+  const renamed = await renameAgentFile({ filePath: created, roots: [dir], newId: "renamed-fresh" })
+  assert.doesNotThrow(() => E.Schema.encodeUnknownSync(toEffectSchema(Subagents.methods.rename.output) as never)(renamed))
+
+  const trashed = await trashAgentFile({ filePath: renamed.path, roots: [dir] })
+  assert.doesNotThrow(() => E.Schema.encodeUnknownSync(toEffectSchema(Subagents.methods.remove.output) as never)(trashed))
+}))
+
+// models 输出：真实 provider 结构（含空 variants）也要能编码
+test("models output encodes with empty variants", () => {
+  const payload = {
+    providers: [{ id: "acme", name: "acme", models: [{ id: "standard", name: "Standard", variants: [] }] }],
+  }
+  assert.doesNotThrow(() => E.Schema.encodeUnknownSync(toEffectSchema(Subagents.methods.models.output) as never)(payload))
+})
+
+// migratePreview 输出：无变化（空 changes）也要能编码
+test("migratePreview output encodes with an empty change list", () => {
+  const payload = { before: "a", after: "a", changes: [] }
+  assert.doesNotThrow(() => E.Schema.encodeUnknownSync(toEffectSchema(Subagents.methods.migratePreview.output) as never)(payload))
+})

@@ -91,7 +91,9 @@ export function rulesFromMatrix(
   const fine = (existing ?? []).filter((r) => r.resource !== "*")
   const readTouched = matrix.actions.read !== matrix.defaultEffect
   if (!readTouched && !hasFineReadRule(existing)) {
-    rules.push(...ENV_RULES.filter((env) => !fine.some((f) => f.action === "read" && f.resource === env.resource)))
+    // hasFineReadRule 为假 ⇒ existing 里没有 read 细规则 ⇒ fine 里没有 read 项，
+    // 因此这里无需再按 resource 去重（原先那层 filter 恒为真，是死谓词）。
+    rules.push(...ENV_RULES)
   }
   rules.push(...fine)
   return rules

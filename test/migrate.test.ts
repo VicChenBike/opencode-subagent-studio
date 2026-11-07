@@ -225,3 +225,49 @@ test("MigrateChange is declared only in rpc.ts", async () => {
   assert.ok(!/export interface MigrateChange\b/.test(fm), "frontmatter.ts must not redeclare MigrateChange")
   assert.ok(/export type \{ MigrateChange \}/.test(fm), "frontmatter.ts must re-export the contract type")
 })
+
+// R3 P3-1：非 ACTIONS 的 V1 平映射条目，若 effect 非默认（如 todowrite: deny），
+// 必须作为末尾规则保留，否则用户的禁止语义被静默丢弃（无损迁移）。
+test("migrate: non-matrix v1 actions with a non-default effect survive as trailing rules", () => {
+  const { content } = migrateContent(
+    "---\ndescription: d\nmode: subagent\npermission:\n  read: allow\n  todowrite: deny\n  question: allow\n---\n\nb\n",
+  )
+  const rules = parseAgentFile(content).meta.permissions as { action: string; resource: string; effect: string }[]
+  const todowrite = rules.filter((r) => r.action === "todowrite")
+  assert.equal(todowrite.length, 1, "todowrite must be kept exactly once")
+  assert.equal(todowrite[0].resource, "*")
+  assert.equal(todowrite[0].effect, "deny")
+  // 末尾位置：排在矩阵的 question 规则之后
+  const questionIdx = rules.findIndex((r) => r.action === "question" && r.resource === "*")
+  const todowriteIdx = rules.findIndex((r) => r.action === "todowrite")
+  assert.ok(todowriteIdx > questionIdx, "non-matrix rule must be appended after the matrix rules")
+})
+
+// 非 ACTIONS 条目若是默认效果（allow），无需保留——不写冗余规则
+test("migrate: non-matrix v1 actions with the default effect are not turned into rules", () => {
+  const { content } = migrateContent(
+    "---\ndescription: d\nmode: subagent\npermission:\n  read: allow\n  todowrite: allow\n---\n\nb\n",
+  )
+  const rules = parseAgentFile(content).meta.permissions as { action: string }[]
+  assert.equal(rules.filter((r) => r.action === "todowrite").length, 0)
+})
+
+// R3 P3-3：prompt 与非空正文并存 → 只删 prompt，正文一字不动（goal.md §9.2）
+test("migrate: prompt is dropped when the body already has content", () => {
+  const raw = `---
+description: d
+mode: subagent
+prompt: |
+  from prompt
+---
+
+existing body
+`
+  const { content, changes } = migrateContent(raw)
+  assert.ok(!content.includes("prompt:"), "prompt field must be removed")
+  assert.ok(!content.includes("from prompt"), "prompt content must not leak into the body")
+  assert.ok(content.includes("existing body"), "existing body must be preserved verbatim")
+  const promptChange = changes.find((c) => c.field === "prompt")
+  assert.ok(promptChange, "a change record for prompt is expected")
+  assert.equal(promptChange!.action, "delete", "with a non-empty body the prompt is deleted, not merged")
+})

@@ -240,3 +240,34 @@ b
   assert.ok(out.includes("- two"))
   assert.ok(out.includes("flag: true"))
 })
+
+// R3 P3-3：applyPatchToSource 对 hidden / color / steps 的「无值即删除」分支
+test("applyPatchToSource deletes hidden, color and steps when the patch omits them", () => {
+  const raw = `---
+description: d
+mode: subagent
+hidden: true
+color: "#ff0000"
+steps: 5
+---
+
+b
+`
+  const out = applyPatchToSource(raw, { description: "d", body: "b\n", matrix: FULL_MATRIX })
+  assert.ok(!out.includes("hidden:"), "hidden must be removed")
+  assert.ok(!out.includes("color:"), "color must be removed")
+  assert.ok(!out.includes("steps:"), "steps must be removed")
+  assert.ok(out.includes("mode: subagent"), "unrelated keys stay")
+  assert.ok(out.includes("description: d"))
+})
+
+// 三者都显式给值时写入
+test("applyPatchToSource writes hidden, color and steps when the patch sets them", () => {
+  const raw = "---\ndescription: d\nmode: subagent\n---\n\nb\n"
+  const out = applyPatchToSource(raw, {
+    description: "d", body: "b\n", hidden: true, color: "#00ff00", steps: 3, matrix: FULL_MATRIX,
+  })
+  assert.ok(out.includes("hidden: true"))
+  assert.ok(out.includes('color: "#00ff00"') || out.includes("color: '#00ff00'") || out.includes("color: \"#00ff00\""))
+  assert.ok(out.includes("steps: 3"))
+})

@@ -4,6 +4,7 @@ import { parseDocument, Document } from "yaml"
 import { matrixFromRules, rulesFromMatrix } from "./permissions.ts"
 import { V1_ACTION_RENAME } from "./migrate-shared.ts"
 import type { AgentPatch, MigrateChange, PermissionRule } from "../rpc.ts"
+import { ACTIONS } from "../rpc.ts"
 
 export interface ParsedFile {
   meta: Record<string, unknown>
@@ -186,8 +187,11 @@ export function migrateContent(raw: string): { content: string; changes: Migrate
   if (isPlainMapping(v1Permission)) {
     const matrix = matrixFromRules(undefined, v1Permission)
     const fine = flattenV1FineRules(v1Permission)
+    const extra = extraV1Rules(v1Permission, matrix.defaultEffect)
     doc.delete("permission")
-    doc.set("permissions", rulesToNode(doc, withToolRules(rulesFromMatrix(matrix, fine), toolRules)))
+    // fine（非 * 细规则）走 rulesFromMatrix 的末尾保留通道；
+    // extra（矩阵外 action 的 * 规则）与 toolRules 一样会被那条通道过滤，单独合并。
+    doc.set("permissions", rulesToNode(doc, withToolRules(rulesFromMatrix(matrix, fine), [...extra, ...toolRules])))
     changes.push({ field: "permission", action: "convert", to: "permissions" })
   } else if (toolRules.length > 0) {
     // 只有 tools、无 permission：默认矩阵 + tools deny 规则
@@ -212,21 +216,40 @@ export function migrateContent(raw: string): { content: string; changes: Migrate
   return { content: `---\n${fm}\n---\n\n${finalBody}`, changes }
 }
 
-// V1 嵌套 permission 中非 "*" 键 → 细粒度规则（保留语义：最后匹配生效）
-function flattenV1FineRules(map: Record<string, unknown>): PermissionRule[] {  const out: PermissionRule[] = []
+// V1 permission 里需要原样带进 V2 的细粒度条目：嵌套映射中非 "*" 的 resource。
+// 平映射条目由 extraV1Rules 处理（矩阵内的 action 由矩阵本身承载）。
+function flattenV1FineRules(map: Record<string, unknown>): PermissionRule[] {
+  const out: PermissionRule[] = []
   for (const [rawAction, value] of Object.entries(map)) {
-    const action = V1_ACTION_RENAME[rawAction] ?? rawAction
     if (!isPlainMapping(value)) continue
+    const action = V1_ACTION_RENAME[rawAction] ?? rawAction
     for (const [resource, effect] of Object.entries(value)) {
       if (resource === "*") continue
-      out.push({
-        action,
-        resource,
-        effect: effect === "ask" ? "ask" : effect === "deny" ? "deny" : "allow",
-      })
+      out.push({ action, resource, effect: asEffect(effect) })
     }
   }
   return out
+}
+
+// 矩阵外 action 的平映射条目（如 todowrite），只有 effect 与默认不同才有语义。
+// 这些规则的 resource 是 "*"，会被 rulesFromMatrix 的细规则通道过滤，故由调用方单独合并到末尾。
+function extraV1Rules(
+  map: Record<string, unknown>,
+  defaultEffect: PermissionRule["effect"],
+): PermissionRule[] {
+  const out: PermissionRule[] = []
+  for (const [rawAction, value] of Object.entries(map)) {
+    if (isPlainMapping(value)) continue
+    const action = V1_ACTION_RENAME[rawAction] ?? rawAction
+    if ((ACTIONS as readonly string[]).includes(action)) continue
+    const effect = asEffect(value)
+    if (effect !== defaultEffect) out.push({ action, resource: "*", effect })
+  }
+  return out
+}
+
+function asEffect(value: unknown): PermissionRule["effect"] {
+  return value === "ask" ? "ask" : value === "deny" ? "deny" : "allow"
 }
 
 // tools 的 false 值转成的 deny 规则是 `action *`（resource 为 "*"），
