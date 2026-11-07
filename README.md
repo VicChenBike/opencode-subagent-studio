@@ -2,7 +2,15 @@
 
 Manage OpenCode V2 subagents from the desktop app: a settings page to view, create, edit, disable, rename and trash subagent markdown files, with live sync for user-level agents and on-demand refresh for project scopes.
 
+> **Translate this README:** this document is maintained in English + Chinese. If you read another language, you are welcome to translate this README with your own AI agent — the text is self-contained and machine-translation friendly.
+
+> **UI dictionary disclaimer:** the plugin ships interface dictionaries for 11 languages (English, 简体中文, Français, Español, Português do Brasil, Русский, العربية, Deutsch, 日本語, हिन्दी, 한국어). They are AI-translated and may read ambiguously; when in doubt, the English copy is authoritative. The settings entry is named "Subagent" in every language.
+
 在 OpenCode Desktop 的设置里管理 V2 子智能体：查看、新建、编辑、停用、重命名、回收站删除；用户级代理实时同步，项目级按需刷新。
+
+> **翻译本 README：** 本文档按英文 + 中文双语维护。如果你习惯其他语言，欢迎用自己的 AI Agent 翻译本 README——正文自包含，适合机翻。
+
+> **界面词典说明：** 插件内置 11 种语言的界面词典（English、简体中文、Français、Español、Português do Brasil、Русский、العربية、Deutsch、日本語、हिन्दी、한국어）。词典由 AI 翻译，个别措辞可能有歧义；如有疑问，以英文文案为准。设置入口在各语言下统一显示为 "Subagent"。
 
 > **Status:** feature-complete for OpenCode Desktop 2.2.5 and verified compatible with 2.2.6. The upstream plugin API is experimental, so a newer desktop release may still break the plugin. This repository has not been published to a public Git host yet; the install command below uses a `<repo-url>` placeholder.
 >
@@ -22,7 +30,7 @@ Manage OpenCode V2 subagents from the desktop app: a settings page to view, crea
 | **Trash** | Deletes move to `agents-trash/` beside the agents directory, restorable by hand | 删除移入 agents 目录旁的 `agents-trash/`，可手动恢复 |
 | **Built-in overrides** | Switch `general` / `explore` models at runtime through plugin storage; nothing is written to `opencode.jsonc` | 内置代理换模型走插件存储，不写配置文件 |
 | **Live sync** | `fs.watch` + 300 ms debounce + `agent.reload()`; user-level directories refresh automatically. In the current build, external changes in a project scope need the Refresh button | `fs.watch` + 300 ms 去抖 + `agent.reload()`；用户级目录自动刷新。当前构建中，项目级目录的外部改动需要点「刷新」 |
-| **i18n** | English and Simplified Chinese | 英文与简体中文 |
+| **i18n** | 11 interface languages (en, zh, fr, es, br, ru, ar, de, ja, hi, ko), AI-translated; the settings entry reads "Subagent" in every language | 11 种界面语言（en、zh、fr、es、br、ru、ar、de、ja、hi、ko），词典由 AI 翻译；设置入口在各语言下统一显示 "Subagent" |
 
 <!-- TODO: add screenshots of the list page and the editor page -->
 
@@ -71,7 +79,7 @@ npm run build
 
 Use your platform's path separator and escape backslashes in JSON, for example on Windows: `"C:\\Users\\<you>\\.config\\opencode\\plugins\\opencode-subagent-manager"`.
 
-3. Restart the desktop app fully (quit from the tray, then relaunch — a window reload is not enough because the server half only loads at process start). Open **Settings → Agent capability → Subagents**.
+3. Restart the desktop app fully (quit from the tray, then relaunch — a window reload is not enough because the server half only loads at process start). Open **Settings → Agent capability → Subagent**.
 
 1. 把仓库克隆到插件目录，然后安装并构建。仓库 URL 尚未发布，发布后请把 `<repo-url>` 换成真实地址；如果你已经拿到这个文件夹，跳过 clone，直接在文件夹里执行下面三条命令。
 
@@ -96,7 +104,7 @@ npm run build
 
 注意使用当前平台的路径分隔符，并在 JSON 中转义反斜杠。Windows 示例：`"C:\\Users\\<you>\\.config\\opencode\\plugins\\opencode-subagent-manager"`。
 
-3. 完全重启桌面端（从托盘退出后重新启动；仅刷新窗口不够，因为服务端部分只在进程启动时加载）。打开 **设置 → Agent 能力 → 子智能体**。
+3. 完全重启桌面端（从托盘退出后重新启动；仅刷新窗口不够，因为服务端部分只在进程启动时加载）。打开 **设置 → Agent 能力 → Subagent**。
 
 ## Usage / 操作指南
 
