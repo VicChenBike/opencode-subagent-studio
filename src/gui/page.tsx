@@ -6,6 +6,9 @@ import type { AgentSummary, BuiltinSummary, ListOutput } from "../rpc"
 import { listViewState, errorMessage, changedAction } from "./list-state"
 import { EditorPage, type EditorTarget } from "./editor"
 import { trashAgent } from "./trash-flow"
+import { toggleDisabled } from "./disable-flow"
+import { MigrationDialog } from "./migration-dialog"
+import type { MigrateChange, ReadOutput } from "../rpc"
 
 type Scope =
   | { kind: "user" }
@@ -179,7 +182,7 @@ export function Page(_props: { target?: string }) {
         </Match>
 
         <Match when={view().kind === "rows"}>
-          <For each={filtered()}>{(agent) => <AgentRow agent={agent} onOpen={() => openEditor(agent)} onDeleted={() => void refetch()} />}</For>
+          <For each={filtered()}>{(agent) => <AgentRow agent={agent} onOpen={() => openEditor(agent)} onDeleted={() => void refetch()} onChanged={() => void refetch()} />}</For>
         </Match>
       </Switch>
 
@@ -194,7 +197,7 @@ export function Page(_props: { target?: string }) {
   )
 }
 
-function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?: () => void }) {
+function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?: () => void; onChanged?: () => void }) {
   const ctx = usePlugin()
   return (
     <div
@@ -202,6 +205,7 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
       style={{
         display: "flex", gap: "8px", "align-items": "center", padding: "8px", "border-radius": "8px",
         cursor: props.onOpen ? "pointer" : "default",
+        opacity: props.agent.disabled ? 0.5 : 1,
       }}
     >
       <span style={{
@@ -232,6 +236,42 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
           {props.agent.description}
         </span>
       </div>
+      {/* goal.md §10：开关写 disabled true/false；V1 先走迁移预览 */}
+      <ctx.ui.Switch
+        label={ctx.t("list.disabled")}
+        hideLabel
+        checked={props.agent.disabled}
+        onChange={(checked) => {
+          void (async () => {
+            const result = await toggleDisabled(
+              {
+                migratePreview: (input) => ctx.client.rpc(Subagents).migratePreview(input) as unknown as Promise<{ before: string; after: string; changes: MigrateChange[] }>,
+                confirmMigration: (preview) =>
+                  new Promise<boolean>((resolve) => {
+                    ctx.dialogs.open((dialog) => (
+                      <MigrationDialog
+                        ctx={ctx}
+                        before={preview.before}
+                        after={preview.after}
+                        changes={preview.changes}
+                        onConfirm={() => { resolve(true); dialog.close() }}
+                        onCancel={() => { resolve(false); dialog.close() }}
+                      />
+                    ))
+                  }),
+                read: (input) => ctx.client.rpc(Subagents).read(input) as unknown as Promise<ReadOutput>,
+                update: (input) => ctx.client.rpc(Subagents).update(input) as unknown as Promise<{ hash: string }>,
+                setDisabled: (input) => ctx.client.rpc(Subagents).setDisabled(input) as unknown as Promise<{ hash: string }>,
+                toast: (input) => ctx.toast.show(input),
+                t: ctx.t,
+              },
+              props.agent,
+              checked,
+            )
+            if (result === "toggled") props.onChanged?.()
+          })()
+        }}
+      />
       {/* goal.md §10：删除 = 移入同级回收站，二次确认 */}
       <ctx.ui.IconButton
         icon="trash"
