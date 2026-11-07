@@ -1,9 +1,9 @@
 // src/gui/page.tsx —— 列表页。ZCode 视觉参考要点：组标题承载归属；行内徽标小圆角。
-import { createSignal, createResource, createMemo, Show, Switch, Match, For } from "solid-js"
+import { createSignal, createResource, createMemo, onCleanup, Show, Switch, Match, For } from "solid-js"
 import { usePlugin } from "@opencode/plugin/gui"
 import { Subagents } from "../rpc"
 import type { AgentSummary, BuiltinSummary, ListOutput } from "../rpc"
-import { listViewState, errorMessage } from "./list-state"
+import { listViewState, errorMessage, changedAction } from "./list-state"
 import { EditorPage, type EditorTarget } from "./editor"
 import { trashAgent } from "./trash-flow"
 
@@ -59,6 +59,18 @@ export function Page(_props: { target?: string }) {
   })
 
   // 视图状态：错误优先（避免 500 时整页空白），其次 loading / 空态 / 搜索空态 / 行列表
+  // goal.md §12.1：changed → 列表重拉；编辑页打开时不覆盖表单，只提示磁盘已更新
+  onCleanup(
+    ctx.client.rpc(Subagents).events.on("changed", () => {
+      const action = changedAction({ editorOpen: editorTarget() !== null, formDirty: true })
+      if (action === "notify") {
+        ctx.toast.show({ title: ctx.t("list.diskUpdated") })
+        return
+      }
+      void refetch()
+    }),
+  )
+
   const view = createMemo(() =>
     listViewState({
       loading: data.loading,

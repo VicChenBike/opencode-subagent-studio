@@ -46,3 +46,17 @@ export function listViewState(input: ListViewInput): ListViewState {
   }
   return { kind: "rows", agents: [...input.agents] }
 }
+
+/**
+ * 收到 changed 事件时的处置（goal.md §12.1 末句）。
+ *
+ * 编辑页打开时一律只提示「磁盘已更新」，不重拉也不覆盖表单：
+ * 用户正在编辑的内容一旦被磁盘版本替换，未保存的修改就无声丢失了。
+ * 这里不区分 formDirty——编辑页的输入永远算作「可能未保存」。
+ */
+export function changedAction(input: {
+  editorOpen: boolean
+  formDirty: boolean
+}): "refetch" | "notify" {
+  return input.editorOpen ? "notify" : "refetch"
+}

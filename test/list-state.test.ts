@@ -68,3 +68,16 @@ test("listViewState keeps the error message for the UI to show", () => {
   assert.equal(state.kind, "error")
   assert.equal(state.kind === "error" && state.message, "Expected string at agents[1].color")
 })
+
+// ---------- P3-T3：changed 事件到达时的处置 ----------
+import { changedAction } from "../src/gui/list-state.ts"
+
+test("changed refetches the list when no editor is open", () => {
+  assert.equal(changedAction({ editorOpen: false, formDirty: false }), "refetch")
+  assert.equal(changedAction({ editorOpen: false, formDirty: true }), "refetch")
+})
+
+test("changed never overwrites an open editor, it only notifies", () => {
+  assert.equal(changedAction({ editorOpen: true, formDirty: false }), "notify")
+  assert.equal(changedAction({ editorOpen: true, formDirty: true }), "notify")
+})
