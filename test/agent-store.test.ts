@@ -99,3 +99,39 @@ test("listAgents omits optional fields instead of leaving undefined own properti
   assert.equal(both.color, "#ff0000")
   assert.equal(both.model, "acme/standard")
 })
+
+// —— goal.md §5.2：列表只显示 mode 精确等于 subagent 的文件 ——
+// primary（主代理本体）、all、无 mode（AGENTS.md §3.3：新建默认 primary）、
+// 以及 frontmatter 缺失/畸形（降级为 {} meta）的文件都必须排除。
+test("listAgents keeps only files whose mode is exactly subagent", async () => {
+  const dir = path.join(tmp, "agents")
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, "is-primary.md"), "---\ndescription: P\nmode: primary\n---\n\nx\n")
+  fs.writeFileSync(path.join(dir, "is-subagent.md"), "---\ndescription: S\nmode: subagent\n---\n\nx\n")
+  fs.writeFileSync(path.join(dir, "is-all.md"), "---\ndescription: A\nmode: all\n---\n\nx\n")
+  fs.writeFileSync(path.join(dir, "no-mode.md"), "---\ndescription: N\n---\n\nx\n")
+  fs.writeFileSync(path.join(dir, "no-frontmatter.md"), "Just a body, no frontmatter\n")
+  fs.writeFileSync(path.join(dir, "scalar-frontmatter.md"), "---\njust-a-scalar\n---\n\nx\n")
+
+  const list = await listAgents(dir)
+  assert.deepEqual(list.map((a) => a.id), ["is-subagent"])
+})
+
+test("listAgents excludes primary agents even when they carry color and model", async () => {
+  const dir = path.join(tmp, "agents")
+  fs.mkdirSync(dir, { recursive: true })
+  // 真实用户级目录里 superpowers.md 就是这种形态：mode: primary + color + model
+  fs.writeFileSync(path.join(dir, "superpowers.md"), "---\ndescription: Primary\nmodel: acme/standard\nmode: primary\ncolor: \"#8b5cf6\"\n---\n\nx\n")
+  fs.writeFileSync(path.join(dir, "helper.md"), "---\ndescription: Helper\nmodel: acme/mini\nmode: subagent\nhidden: true\n---\n\nx\n")
+  const list = await listAgents(dir)
+  assert.deepEqual(list.map((a) => a.id), ["helper"])
+})
+
+test("listAgents still scans nested subdirectories and applies the mode filter there", async () => {
+  const dir = path.join(tmp, "agents")
+  fs.mkdirSync(path.join(dir, "team"), { recursive: true })
+  fs.writeFileSync(path.join(dir, "team", "reviewer.md"), "---\ndescription: R\nmode: subagent\n---\n\nx\n")
+  fs.writeFileSync(path.join(dir, "team", "lead.md"), "---\ndescription: L\nmode: primary\n---\n\nx\n")
+  const list = await listAgents(dir)
+  assert.deepEqual(list.map((a) => a.id), ["team/reviewer"])
+})

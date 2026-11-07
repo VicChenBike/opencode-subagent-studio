@@ -74,6 +74,12 @@ export async function listAgents(dir: string): Promise<AgentSummaryRow[]> {
     const id = path.relative(dir, file).replace(/\.md$/, "").split(path.sep).join("/")
     const content = await fs.readFile(file, "utf8")
     const parsed = parseAgentFile(content)
+    // goal.md §5.2：列表只显示 mode 精确等于 subagent 的文件。
+    // - primary：主代理本体（如 superpowers.md），不是子代理
+    // - all：v1 暂不显示，避免与子代理混淆
+    // - 无 mode：AGENTS.md §3.3 规定新建自定义代理默认 primary，同样排除
+    // - frontmatter 缺失/畸形：parseAgentFile 已降级为 {} meta，无 mode，排除
+    if (parsed.meta.mode !== "subagent") continue
     const st = await statOr(file)
     const row: AgentSummaryRow = {
       id,
