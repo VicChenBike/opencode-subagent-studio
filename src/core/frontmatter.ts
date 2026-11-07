@@ -26,6 +26,9 @@ export function parseAgentFile(raw: string): ParsedFile {
   const { frontmatter, body } = splitFrontmatter(raw)
   if (frontmatter === null) return { meta: {}, body: raw, format: "v1", raw }
   const doc = parseDocument(frontmatter)
-  const meta = (doc.toJS() ?? {}) as Record<string, unknown>
+  const js = doc.toJS()
+  // frontmatter 不是映射（纯标量 / 数组 / null / 解析失败）时按空 meta 处理，
+  // 避免单个畸形文件让整份目录扫描抛错。
+  const meta = js !== null && typeof js === "object" && !Array.isArray(js) ? (js as Record<string, unknown>) : {}
   return { meta, body, format: detectFormat(meta), raw }
 }

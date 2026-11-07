@@ -84,3 +84,27 @@ test("parseAgentFile keeps unknown fields verbatim", () => {
   assert.equal(parsed.meta.foo, "bar")
   assert.equal(parsed.body, "Body")
 })
+
+// R1 审查发现：frontmatter 是纯标量 / 数组时 detectFormat 会抛 TypeError，导致整个目录扫描失败
+test("parseAgentFile tolerates scalar frontmatter", () => {
+  const parsed = parseAgentFile("---\njust-a-scalar\n---\n\nBody\n")
+  assert.equal(parsed.format, "v1")
+  assert.deepEqual(parsed.meta, {})
+  assert.equal(parsed.body, "Body\n")
+})
+
+test("parseAgentFile tolerates list frontmatter", () => {
+  const parsed = parseAgentFile("---\n- a\n- b\n---\n\nBody\n")
+  assert.equal(parsed.format, "v1")
+  assert.deepEqual(parsed.meta, {})
+  assert.equal(parsed.body, "Body\n")
+})
+
+test("parseAgentFile tolerates null and broken yaml", () => {
+  assert.deepEqual(parseAgentFile("---\nnull\n---\n\nBody\n").meta, {})
+  // 半截 flow 序列由 yaml 宽松解析；这里只要求不抛错且 meta 仍是普通对象
+  const broken = parseAgentFile("---\ndescription: [unclosed\n---\n\nBody\n")
+  assert.equal(Array.isArray(broken.meta), false)
+  assert.equal(typeof broken.meta, "object")
+  assert.equal(broken.body, "Body\n")
+})
