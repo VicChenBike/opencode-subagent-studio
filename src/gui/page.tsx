@@ -1,8 +1,9 @@
 // src/gui/page.tsx —— 列表页。ZCode 视觉参考要点：组标题承载归属；行内徽标小圆角。
-import { createSignal, createResource, createMemo, Show, For } from "solid-js"
+import { createSignal, createResource, createMemo, Show, Switch, Match, For } from "solid-js"
 import { usePlugin } from "@opencode/plugin/gui"
 import { Subagents } from "../rpc"
 import type { AgentSummary, BuiltinSummary, ListOutput } from "../rpc"
+import { listViewState, errorMessage } from "./list-state"
 
 type Scope =
   | { kind: "user" }
@@ -50,6 +51,18 @@ export function Page(_props: { target?: string }) {
     )
   })
 
+  // 视图状态：错误优先（避免 500 时整页空白），其次 loading / 空态 / 搜索空态 / 行列表
+  const view = createMemo(() =>
+    listViewState({
+      loading: data.loading,
+      error: data.error,
+      agents: filtered(),
+      query: query(),
+    }),
+  )
+
+  const errorText = () => errorMessage(data.error)
+
   const scopeLabel = () => {
     const s = scope()
     return s.kind === "user" ? ctx.t("list.scope.user") : ctx.t("list.scope.project", { project: s.projectName })
@@ -81,20 +94,49 @@ export function Page(_props: { target?: string }) {
         <ctx.ui.IconButton icon="refresh" label={ctx.t("list.refresh")} onClick={() => void refetch()} />
       </div>
 
-      <Show when={!data.loading} fallback={<ctx.ui.Loader />}>
-        <Show when={filtered().length > 0} fallback={
-          <div style={{ border: "1px dashed", "border-radius": "8px", padding: "24px", opacity: 0.6, "text-align": "center" }}>
-            {query() ? ctx.t("list.emptySearch", { query: query() }) : ctx.t("list.empty")}
+      <Switch fallback={<ctx.ui.Loader />}>
+        <Match when={view().kind === "error"}>
+          {/* 错误态：显示宿主返回的错误信息 + 重试，避免 500 时整页空白 */}
+          <div style={{ border: "1px solid", "border-radius": "8px", padding: "24px", display: "flex", "flex-direction": "column", gap: "12px", "align-items": "center", "text-align": "center" }}>
+            <div style={{ "font-weight": 600 }}>{ctx.t("list.error.title")}</div>
+            <Show when={errorText()}>
+              <div style={{ "font-size": "12px", opacity: 0.7, "word-break": "break-word", "max-width": "100%" }}>
+                {errorText()}
+              </div>
+            </Show>
+            <ctx.ui.Button variant="neutral" icon="refresh" onClick={() => void refetch()}>
+              {ctx.t("list.error.retry")}
+            </ctx.ui.Button>
           </div>
-        }>
-          <For each={filtered()}>{(agent) => <AgentRow agent={agent} />}</For>
-        </Show>
-      </Show>
+        </Match>
 
-      <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
-        <div style={{ "font-weight": 600, opacity: 0.8 }}>{ctx.t("list.builtin")}</div>
-        <For each={data()?.builtins ?? []}>{(b) => <BuiltinRow builtin={b} />}</For>
-      </div>
+        <Match when={view().kind === "loading"}>
+          <ctx.ui.Loader />
+        </Match>
+
+        <Match when={view().kind === "empty"}>
+          <div style={{ border: "1px dashed", "border-radius": "8px", padding: "24px", opacity: 0.6, "text-align": "center" }}>
+            {ctx.t("list.empty")}
+          </div>
+        </Match>
+
+        <Match when={view().kind === "emptySearch"}>
+          <div style={{ border: "1px dashed", "border-radius": "8px", padding: "24px", opacity: 0.6, "text-align": "center" }}>
+            {ctx.t("list.emptySearch", { query: query().trim() })}
+          </div>
+        </Match>
+
+        <Match when={view().kind === "rows"}>
+          <For each={filtered()}>{(agent) => <AgentRow agent={agent} />}</For>
+        </Match>
+      </Switch>
+
+      <Show when={view().kind !== "error" && view().kind !== "loading"}>
+        <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
+          <div style={{ "font-weight": 600, opacity: 0.8 }}>{ctx.t("list.builtin")}</div>
+          <For each={data()?.builtins ?? []}>{(b) => <BuiltinRow builtin={b} />}</For>
+        </div>
+      </Show>
     </div>
   )
 }
