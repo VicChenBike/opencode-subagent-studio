@@ -75,3 +75,55 @@ test("the list error state has copy in both languages", () => {
   assert.equal(catalog["zh-Hans"]["list.error.retry"], "重试")
   assert.equal(catalog.en["list.error.retry"], "Try again")
 })
+
+// R4 补强：changeLabelKey 输出的 9 个 migrate.change.* 键必须都在目录里。
+// 这 9 个键是动态拼出来的（migration-logic.ts 的 switch），静态扫描抓不到，
+// 一旦有人删键，迁移预览会显示裸键名。
+test("all nine migrate.change.* copy keys exist in every locale", () => {
+  const keys = [
+    "migrate.change.name",
+    "migrate.change.permission",
+    "migrate.change.disable",
+    "migrate.change.model",
+    "migrate.change.temperature",
+    "migrate.change.tools",
+    "migrate.change.maxSteps",
+    "migrate.change.prompt",
+    "migrate.change.other",
+  ]
+  assert.equal(keys.length, 9)
+  for (const key of keys) {
+    for (const locale of Object.keys(catalog)) {
+      assert.ok(key in catalog[locale as keyof typeof catalog], `${locale} missing ${key}`)
+    }
+  }
+})
+
+// 与 changeLabelKey 的实际输出对齐：把每个 goal.md §9.2 字段走一遍函数，断言产出的键都在目录里
+test("every key changeLabelKey can produce is present in the catalog", async () => {
+  const { changeLabelKey } = await import("../src/gui/migration-logic.ts")
+  const fields = [
+    "name", "permission", "disable", "model",
+    "temperature", "top_p", "options", "tools", "maxSteps", "prompt",
+    "some-unknown-field",
+  ]
+  const produced = new Set(fields.map((field) => changeLabelKey({ field, action: "convert" })))
+  assert.equal(produced.size, 9, `expected 9 distinct keys, got ${produced.size}`)
+  for (const key of produced) {
+    for (const locale of Object.keys(catalog)) {
+      assert.ok(key in catalog[locale as keyof typeof catalog], `${locale} missing ${key} (produced by changeLabelKey)`)
+    }
+  }
+})
+
+// 三态权限标签：permission-grid 用 effectKey() 拼键，静态扫描抓不到
+test("perm.allow / perm.ask / perm.deny exist in every locale", () => {
+  for (const key of ["perm.allow", "perm.ask", "perm.deny"]) {
+    for (const locale of Object.keys(catalog)) {
+      assert.ok(key in catalog[locale as keyof typeof catalog], `${locale} missing ${key}`)
+    }
+  }
+  assert.equal(catalog["zh-Hans"]["perm.allow"], "允许")
+  assert.equal(catalog["zh-Hans"]["perm.ask"], "询问")
+  assert.equal(catalog["zh-Hans"]["perm.deny"], "禁止")
+})

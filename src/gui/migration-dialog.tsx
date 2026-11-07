@@ -18,6 +18,10 @@ export function MigrationDialog(props: {
       title={ctx.t("migrate.title")}
       description={ctx.t("migrate.desc")}
       size="x-large"
+      // 隐藏标题栏的关闭按钮，引导用户走显式的「取消 / 转换并保存」。
+      // 注意：宿主的 closable={false} 只隐藏按钮——Esc 与点外点击仍会关闭且不触发回调，
+      // 所以保存流程不能依赖本弹窗的回调来 resolve（见 migration-logic.ts 的 saveStep 注释）。
+      closable={false}
       footer={
         <div style={{ display: "flex", gap: "8px", "justify-content": "flex-end" }}>
           <ctx.ui.Button variant="ghost" onClick={props.onCancel}>{ctx.t("common.cancel")}</ctx.ui.Button>

@@ -40,3 +40,24 @@ export function shouldPromptMigration(input: {
 }): boolean {
   return input.format === "v1" && !input.migrateConfirmed
 }
+
+/**
+ * 保存前的下一步动作。
+ *
+ * 关键约束：预览弹窗**不能**用 `await` 等待一个由弹窗回调 resolve 的 Promise。
+ * 宿主 `Ui.Dialog` 的 `closable={false}` 只隐藏关闭按钮——类型文档与运行时实现都确认
+ * Esc 与点外点击仍会关闭对话框，且关闭时不触发任何回调。若保存流程挂在那个 Promise 上，
+ * 用户按 Esc 后 `save()` 的 `finally` 永远不执行，保存按钮会永久停在 busy。
+ *
+ * 所以流程拆成「先弹预览（不 await 结果）」→「用户点确认才继续保存」两步。
+ */
+export function saveStep(input: {
+  mode: "edit" | "create"
+  format: "v1" | "v2"
+  migrateConfirmed: boolean
+}): "preview" | "save" {
+  if (input.mode === "create") return "save"
+  return shouldPromptMigration({ format: input.format, migrateConfirmed: input.migrateConfirmed })
+    ? "preview"
+    : "save"
+}

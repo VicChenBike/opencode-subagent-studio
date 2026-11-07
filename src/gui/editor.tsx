@@ -7,7 +7,7 @@ import type { AgentPatch, PermissionMatrix, ReadOutput, ProviderSummary, ModelsO
 import { matrixFromRules } from "../core/permissions.ts"
 import { splitModelRef, buildPatch, validateEditor, createInputOf, conflictAction } from "./editor-form"
 import { variantsOf } from "./model-picker-logic"
-import { shouldPromptMigration } from "./migration-logic"
+import { saveStep } from "./migration-logic"
 import { MigrationDialog } from "./migration-dialog"
 import { PermissionGrid } from "./permission-grid"
 import { openModelPicker } from "./model-picker"
@@ -129,6 +129,17 @@ export function EditorPage(props: {
 
   const save = async () => {
     if (!validation().canSave || saving()) return
+    // V1 文件先弹迁移预览；确认后由预览弹窗的回调继续走 runSave（不在这里 await 预览结果）
+    if (saveStep({ mode: props.target.mode, format: format(), migrateConfirmed: migrateConfirmed() }) === "preview") {
+      await openMigrationPreview()
+      return
+    }
+    await runSave()
+  }
+
+  // 真正的写入。预览确认后由弹窗回调再次调用，所以 saving 状态与 toast 都在这里管理。
+  const runSave = async () => {
+    if (saving()) return
     setSaving(true)
     try {
       if (props.target.mode === "create") {
@@ -154,30 +165,44 @@ export function EditorPage(props: {
     }
   }
 
-  const saveUpdate = async (): Promise<"saved" | "reloaded"> => {
+  // V1 迁移预览（goal.md §9.1）。
+  // 关键：这里**不 await** 预览结果。宿主 Ui.Dialog 的 closable={false} 只隐藏关闭按钮，
+  // Esc 与点外点击仍会关闭且不触发任何回调；若保存流程挂在弹窗回调 resolve 的 Promise 上，
+  // 用户按 Esc 后 save() 的 finally 永不执行，保存按钮会永久 busy。
+  // 因此拆成「弹预览」→「用户点确认才继续保存」两步。
+  const openMigrationPreview = async () => {
     const pathArg = props.target.path!
-    // goal.md §9.1：编辑 V1 文件且保存会产生 V2 字段 → 首次保存前弹迁移预览
-    if (shouldPromptMigration({ format: format(), migrateConfirmed: migrateConfirmed() })) {
+    try {
       const preview = (await ctx.client.rpc(Subagents).migratePreview({ path: pathArg })) as unknown as {
         before: string
         after: string
         changes: MigrateChange[]
       }
-      const ok = await new Promise<boolean>((resolve) => {
-        ctx.dialogs.open((dialog) => (
-          <MigrationDialog
-            ctx={ctx}
-            before={preview.before}
-            after={preview.after}
-            changes={preview.changes}
-            onConfirm={() => { resolve(true); dialog.close() }}
-            onCancel={() => { resolve(false); dialog.close() }}
-          />
-        ))
+      ctx.dialogs.open((dialog) => (
+        <MigrationDialog
+          ctx={ctx}
+          before={preview.before}
+          after={preview.after}
+          changes={preview.changes}
+          onConfirm={() => {
+            dialog.close()
+            setMigrateConfirmed(true)
+            void runSave()
+          }}
+          onCancel={() => dialog.close()}
+        />
+      ))
+    } catch (e) {
+      ctx.toast.show({
+        title: ctx.t("common.error"),
+        description: String((e as { message?: string })?.message ?? e),
+        variant: "error",
       })
-      if (!ok) return "reloaded"
-      setMigrateConfirmed(true)
     }
+  }
+
+  const saveUpdate = async (): Promise<"saved" | "reloaded"> => {
+    const pathArg = props.target.path!
     try {
       await ctx.client.rpc(Subagents).update({ path: pathArg, expectedHash: hash()!, patch: currentPatch() })
       return "saved"
