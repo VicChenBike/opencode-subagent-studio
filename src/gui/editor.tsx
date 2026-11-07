@@ -3,10 +3,12 @@
 import { createSignal, createMemo, Show, For, onMount } from "solid-js"
 import { usePlugin } from "@opencode/plugin/gui"
 import { Subagents, ACTIONS } from "../rpc"
-import type { AgentPatch, PermissionMatrix, ReadOutput, ProviderSummary, ModelsOutput } from "../rpc"
+import type { AgentPatch, PermissionMatrix, ReadOutput, ProviderSummary, ModelsOutput, MigrateChange } from "../rpc"
 import { matrixFromRules } from "../core/permissions.ts"
-import { splitModelRef, buildPatch, validateEditor, createInputOf } from "./editor-form"
+import { splitModelRef, buildPatch, validateEditor, createInputOf, conflictAction } from "./editor-form"
 import { variantsOf } from "./model-picker-logic"
+import { shouldPromptMigration } from "./migration-logic"
+import { MigrationDialog } from "./migration-dialog"
 import { PermissionGrid } from "./permission-grid"
 import { openModelPicker } from "./model-picker"
 
@@ -52,6 +54,8 @@ export function EditorPage(props: {
   const [matrix, setMatrix] = createSignal<PermissionMatrix>(defaultMatrix())
   const [draftId, setDraftId] = createSignal(props.target.draftId ?? "")
   const [saving, setSaving] = createSignal(false)
+  // V1 文件本次编辑是否已确认迁移预览（goal.md §9.1：首次保存前弹一次）
+  const [migrateConfirmed, setMigrateConfirmed] = createSignal(false)
 
   onMount(() => {
     if (props.target.mode !== "edit" || !props.target.path) return
@@ -152,6 +156,28 @@ export function EditorPage(props: {
 
   const saveUpdate = async (): Promise<"saved" | "reloaded"> => {
     const pathArg = props.target.path!
+    // goal.md §9.1：编辑 V1 文件且保存会产生 V2 字段 → 首次保存前弹迁移预览
+    if (shouldPromptMigration({ format: format(), migrateConfirmed: migrateConfirmed() })) {
+      const preview = (await ctx.client.rpc(Subagents).migratePreview({ path: pathArg })) as unknown as {
+        before: string
+        after: string
+        changes: MigrateChange[]
+      }
+      const ok = await new Promise<boolean>((resolve) => {
+        ctx.dialogs.open((dialog) => (
+          <MigrationDialog
+            ctx={ctx}
+            before={preview.before}
+            after={preview.after}
+            changes={preview.changes}
+            onConfirm={() => { resolve(true); dialog.close() }}
+            onCancel={() => { resolve(false); dialog.close() }}
+          />
+        ))
+      })
+      if (!ok) return "reloaded"
+      setMigrateConfirmed(true)
+    }
     try {
       await ctx.client.rpc(Subagents).update({ path: pathArg, expectedHash: hash()!, patch: currentPatch() })
       return "saved"
@@ -169,7 +195,7 @@ export function EditorPage(props: {
         ],
         current: "reload",
       })
-      if (choice === "overwrite") {
+      if (conflictAction(choice) === "overwrite") {
         await ctx.client.rpc(Subagents).update({ path: pathArg, expectedHash: hash()!, patch: currentPatch(), force: true })
         return "saved"
       }

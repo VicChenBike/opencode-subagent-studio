@@ -207,3 +207,72 @@ test("create flow writes a v2 file, then shows up in the list and rejects a dupl
     (e: Error & { code?: string }) => e.code === "exists",
   )
 }))
+
+// P2-T8：V1 文件的保存链路 = 迁移预览 → 整份迁移 → 打补丁。
+// 用真实文件验证：预览给出 before/after/changes，update 落盘后文件是纯 V2。
+test("v1 save flow migrates the whole file before applying the patch", withTempAgents({
+  "legacy.md": `---
+name: legacy
+description: Old description
+mode: subagent
+model: acme/standard
+variant: high
+disable: true
+maxSteps: 5
+permission:
+  read: allow
+  edit: allow
+  bash:
+    "*": allow
+    "git push *": ask
+---
+
+Old body.
+`,
+}, async (dir) => {
+  const { previewMigrationFile, updateAgentFile, hashOf, readAgentFile } = await import("../src/core/agent-store.ts")
+  const file = path.join(dir, "legacy.md")
+
+  // 1. 预览
+  const preview = await previewMigrationFile({ filePath: file })
+  assert.ok(preview.before.includes("name: legacy"))
+  assert.ok(!preview.after.includes("name:"), "after must be v2")
+  const fields = preview.changes.map((c) => c.field)
+  for (const expected of ["name", "disable", "maxSteps", "model", "permission"]) {
+    assert.ok(fields.includes(expected), `preview must report ${expected}`)
+  }
+  // 预览输出本身也必须是合法可解析的 V2
+  const parsedAfter = (await import("../src/core/frontmatter.ts")).parseAgentFile(preview.after)
+  assert.equal(parsedAfter.format, "v2")
+
+  // 2. 保存（GUI 确认预览后走这条路径）。
+  // GUI 从 meta 读回 model / steps 并随 patch 带上（editor.tsx 的 buildPatch），所以这里也带上，
+  // 以验证「迁移 + 打补丁」后这些值仍以 V2 形态存在。
+  const before = await readAgentFile(file)
+  const matrix = {
+    defaultEffect: "allow" as const,
+    actions: { read: "allow", glob: "allow", grep: "allow", edit: "allow", shell: "allow",
+      webfetch: "allow", websearch: "allow", skill: "allow", subagent: "allow", question: "allow" } as const,
+  }
+  const { hash } = await updateAgentFile({
+    filePath: file,
+    roots: [dir],
+    expectedHash: before.hash,
+    patch: { description: "New description", body: "New body.\n", model: "acme/standard#high", steps: 5, matrix },
+  })
+  assert.equal(typeof hash, "string")
+  assert.equal(hash, hashOf(await (await import("node:fs/promises")).readFile(file, "utf8")))
+
+  // 3. 落盘结果：纯 V2，无任何 V1 残留，细规则保留
+  const after = await readAgentFile(file)
+  assert.equal(after.format, "v2")
+  assert.equal(after.meta.description, "New description")
+  assert.equal(after.body, "New body.\n")
+  const raw = await (await import("node:fs/promises")).readFile(file, "utf8")
+  for (const key of ["name:", "variant:", "disable:", "maxSteps:", "permission:"]) {
+    assert.ok(!raw.includes(`\n${key}`) && !raw.startsWith(`---\n${key}`), `v1 key leaked: ${key}`)
+  }
+  assert.ok(raw.includes("steps: 5"), "maxSteps renamed to steps")
+  assert.ok(raw.includes("model: acme/standard#high"), "model and variant merged")
+  assert.ok(raw.includes("git push *"), "fine-grained shell rule preserved")
+}))
