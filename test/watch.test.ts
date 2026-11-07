@@ -215,3 +215,34 @@ test("watchAgentsDir returns null for a path that cannot be watched", () => {
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// R5 P2-1 回归：watchAgentsDir 与 index.ts 的外层去抖不能叠加成双重延迟。
+// 外层固定 300ms（goal.md §12.1）；内层必须传 0，否则实际最短 600ms。
+// 断言源码里的实际调用参数（运行时无法观测 setup 内的组合）。
+test("index.ts passes delayMs 0 so the outer 300ms debounce is the only one", async () => {
+  const source = await import("node:fs/promises").then((m) =>
+    m.readFile(new URL("../src/index.ts", import.meta.url), "utf8"),
+  )
+  // 参数里含嵌套括号（projectAgentsDir(...)），按行取调用即可
+  const watchLines = source.split("\n").filter((line) => line.includes("watchAgentsDir("))
+  assert.ok(watchLines.length > 0, "index.ts must start at least one watcher")
+  for (const line of watchLines) {
+    assert.match(line, /delayMs:\s*0/, `every watchAgentsDir call must pass delayMs 0: ${line.trim()}`)
+  }
+})
+
+test("watchAgentsDir still coalesces bursts when delayMs is 0", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "osm-watch-"))
+  let hits = 0
+  const watcher = watchAgentsDir(dir, () => { hits++ }, { delayMs: 0 })
+  try {
+    const started = Date.now()
+    fs.writeFileSync(path.join(dir, "a.md"), "---" + String.fromCharCode(10) + "description: A" + String.fromCharCode(10) + "mode: subagent" + String.fromCharCode(10) + "---" + String.fromCharCode(10) + String.fromCharCode(10) + "x" + String.fromCharCode(10))
+    assert.ok(await waitFor(() => hits > 0, 1500, 10), "a write must reach the callback")
+    const elapsed = Date.now() - started
+    assert.ok(elapsed < 300, `delayMs 0 must not add 300ms (took ${elapsed}ms)`)
+  } finally {
+    watcher?.close()
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})

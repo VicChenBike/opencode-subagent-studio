@@ -127,3 +127,24 @@ test("perm.allow / perm.ask / perm.deny exist in every locale", () => {
   assert.equal(catalog["zh-Hans"]["perm.ask"], "询问")
   assert.equal(catalog["zh-Hans"]["perm.deny"], "禁止")
 })
+
+// R5 P3-1：trash-flow.ts 通过注入的 t 引用文案，不走 ctx.t( 前缀，静态扫描抓不到。
+// 这里按两种方式覆盖：①扫描 t("...") 形式的直接调用；②显式列出它引用的键。
+test("keys referenced through an injected t are scanned too", () => {
+  const source = fs.readFileSync(path.join(guiDir, "trash-flow.ts"), "utf8")
+  const keys = new Set<string>()
+  // deps.t("x") / t("x") —— 排除 ctx.t（那种由上面的测试覆盖）
+  for (const m of source.matchAll(/(?<!ctx\.)\bt\(\s*["']([^"']+)["']/g)) keys.add(m[1])
+  assert.ok(keys.size > 0, "expected trash-flow.ts to reference some keys")
+  const missing = [...keys].filter((k) => !(k in catalog.en))
+  assert.deepEqual(missing, [], `keys missing from catalog: ${missing.join(", ")}`)
+})
+
+test("trash-flow's known copy keys all exist in every locale", () => {
+  const keys = ["list.delete.title", "list.delete.desc", "toast.deleted", "common.error"]
+  for (const key of keys) {
+    for (const locale of Object.keys(catalog)) {
+      assert.ok(key in catalog[locale as keyof typeof catalog], `${locale} missing ${key}`)
+    }
+  }
+})

@@ -173,14 +173,16 @@ export default Plugin.define({
         projectWatcher?.close()
         projectWatcher = null
         if (q.projectPath) {
-          projectWatcher = watchAgentsDir(projectAgentsDir(q.projectPath), () => changeDebouncer.trigger())
+          projectWatcher = watchAgentsDir(projectAgentsDir(q.projectPath), () => changeDebouncer.trigger(), { delayMs: 0 })
         }
         return {}
       },
     })
 
-    // 用户级目录常驻监听（goal.md §12.1）；目录不存在时 watchAgentsDir 会先创建
-    const userWatcher = watchAgentsDir(userAgentsDir(), () => changeDebouncer.trigger())
+    // 用户级目录常驻监听（goal.md §12.1）；目录不存在时 watchAgentsDir 会先创建。
+    // delayMs: 0 —— 去抖只在这一层做（下面 300ms）。watchAgentsDir 自带 300ms 默认值，
+    // 两层叠加会让实际延迟变成 600ms，超出 goal.md §12.1 的规格。
+    const userWatcher = watchAgentsDir(userAgentsDir(), () => changeDebouncer.trigger(), { delayMs: 0 })
 
     return () => {
       userWatcher?.close()
