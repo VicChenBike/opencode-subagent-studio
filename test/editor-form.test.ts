@@ -2,7 +2,9 @@
 // GUI 组件本身无法在 node --test 里渲染，把可判定的逻辑抽出来单测。
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { splitModelRef, buildPatch, optionalFieldsOf, validateEditor, patchFromRead, conflictAction } from "../src/gui/editor-form.ts"
+import {
+  splitModelRef, buildPatch, validateEditor, patchFromRead, conflictAction, createInputOf,
+} from "../src/gui/editor-form.ts"
 import type { ReadOutput } from "../src/rpc.ts"
 
 const MATRIX = {
@@ -36,13 +38,6 @@ test("buildPatch drops hidden when false and parses steps", () => {
   assert.equal(noSteps.steps, undefined)
   const steps = buildPatch({ description: "d", body: "b", stepsText: "8", matrix: MATRIX })
   assert.equal(steps.steps, 8)
-})
-
-test("optionalFieldsOf omits absent values so RPC input stays schema-clean", () => {
-  const fields = optionalFieldsOf({ description: "d", body: "b", matrix: MATRIX })
-  assert.deepEqual(Object.keys(fields).sort(), ["body", "description", "matrix"])
-  const full = optionalFieldsOf({ description: "d", body: "b", model: "a/b", color: "#fff", hidden: true, steps: 2, matrix: MATRIX })
-  assert.deepEqual(Object.keys(full).sort(), ["body", "color", "description", "hidden", "matrix", "model", "steps"])
 })
 
 test("validateEditor flags invalid, reserved and duplicate ids", () => {
@@ -114,4 +109,55 @@ test("conflictAction sends reload back to the list and only overwrite stays", ()
   assert.equal(conflictAction("reload"), "back")
   assert.equal(conflictAction(undefined), "back", "dismissing the dialog must also leave")
   assert.equal(conflictAction("overwrite"), "overwrite")
+})
+
+// P2-T7：create 的 RPC 入参构造（作用域继承 + 可选字段按需带）
+test("createInputOf carries the scope and omits absent optional fields", () => {
+  const input = createInputOf({
+    scope: { kind: "user" },
+    id: "fresh",
+    patch: { description: "d", body: "b", matrix: MATRIX },
+  })
+  assert.equal(input.scope, "user")
+  assert.equal(input.id, "fresh")
+  assert.equal("projectPath" in input, false, "user scope must not send projectPath")
+  assert.deepEqual(Object.keys(input).sort(), ["body", "description", "id", "matrix", "scope"])
+})
+
+test("createInputOf sends projectPath for a project scope", () => {
+  const input = createInputOf({
+    scope: { kind: "project", projectPath: "C:/tmp/proj", projectName: "proj" },
+    id: "fresh",
+    patch: { description: "d", body: "b", matrix: MATRIX },
+  })
+  assert.equal(input.scope, "project")
+  assert.equal(input.projectPath, "C:/tmp/proj")
+  assert.equal("projectName" in input, false, "projectName is UI-only and must not reach the RPC")
+})
+
+test("createInputOf forwards every optional field that is present", () => {
+  const input = createInputOf({
+    scope: { kind: "user" },
+    id: "fresh",
+    patch: { description: "d", body: "b", model: "acme/standard#high", color: "#fff", hidden: true, steps: 5, matrix: MATRIX },
+  })
+  assert.equal(input.model, "acme/standard#high")
+  assert.equal(input.color, "#fff")
+  assert.equal(input.hidden, true)
+  assert.equal(input.steps, 5)
+})
+
+// P2-T7：空名称必须被实时校验挡住（不会走到 RPC）
+test("validateEditor blocks an empty id before any create call", () => {
+  const res = validateEditor({ mode: "create", id: "", description: "d", stepsText: "", existingIds: [] })
+  assert.equal(res.idError, "invalid")
+  assert.equal(res.canSave, false)
+})
+
+// 新建成功后 existingIds 变化即视为「列表已刷新」的依据
+test("validateEditor reports duplicate once the new id appears in existingIds", () => {
+  const before = validateEditor({ mode: "create", id: "fresh", description: "d", stepsText: "", existingIds: [] })
+  assert.equal(before.idError, undefined)
+  const after = validateEditor({ mode: "create", id: "fresh", description: "d", stepsText: "", existingIds: ["fresh"] })
+  assert.equal(after.idError, "duplicate")
 })

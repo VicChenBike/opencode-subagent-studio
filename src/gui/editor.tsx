@@ -5,7 +5,7 @@ import { usePlugin } from "@opencode/plugin/gui"
 import { Subagents, ACTIONS } from "../rpc"
 import type { AgentPatch, PermissionMatrix, ReadOutput, ProviderSummary, ModelsOutput } from "../rpc"
 import { matrixFromRules } from "../core/permissions.ts"
-import { splitModelRef, buildPatch, optionalFieldsOf, validateEditor } from "./editor-form"
+import { splitModelRef, buildPatch, validateEditor, createInputOf } from "./editor-form"
 import { variantsOf } from "./model-picker-logic"
 import { PermissionGrid } from "./permission-grid"
 import { openModelPicker } from "./model-picker"
@@ -128,13 +128,10 @@ export function EditorPage(props: {
     setSaving(true)
     try {
       if (props.target.mode === "create") {
-        const s = props.target.scope
-        await ctx.client.rpc(Subagents).create({
-          scope: s.kind === "user" ? "user" : "project",
-          ...(s.kind === "project" ? { projectPath: s.projectPath } : {}),
-          id: id(),
-          ...optionalFieldsOf(currentPatch()),
-        })
+        // P2-T7：作用域继承列表当前选择；可选字段按需带（createInputOf 已单测）
+        await ctx.client.rpc(Subagents).create(
+          createInputOf({ scope: props.target.scope, id: id(), patch: currentPatch() }),
+        )
         ctx.toast.show({ title: ctx.t("toast.created"), variant: "success" })
       } else {
         const result = await saveUpdate()

@@ -51,20 +51,6 @@ export function buildPatch(draft: EditorDraft): AgentPatch {
   return patch
 }
 
-/** create 的 RPC 入参只需要有值的可选字段（避免把 undefined 塞进 JSON）。 */
-export function optionalFieldsOf(patch: AgentPatch): Record<string, unknown> {
-  const out: Record<string, unknown> = {
-    description: patch.description,
-    body: patch.body,
-    matrix: patch.matrix,
-  }
-  if (patch.model !== undefined) out.model = patch.model
-  if (patch.color !== undefined) out.color = patch.color
-  if (patch.hidden !== undefined) out.hidden = patch.hidden
-  if (patch.steps !== undefined) out.steps = patch.steps
-  return out
-}
-
 export interface ValidateInput {
   mode: "edit" | "create"
   id: string
@@ -136,4 +122,49 @@ export function patchFromRead(res: ReadOutput): AgentPatch {
  */
 export function conflictAction(choice: "reload" | "overwrite" | undefined): "back" | "overwrite" {
   return choice === "overwrite" ? "overwrite" : "back"
+}
+
+export interface CreateScope {
+  kind: "user" | "project"
+  projectPath?: string
+  projectName?: string
+}
+
+/**
+ * create 的 RPC 入参（P2-T7）。
+ * - 作用域继承列表当前选择
+ * - 可选字段只带有值的（undefined 不进 JSON，避免宿主 schema 报错）
+ * - projectName 是 UI 文案用的，绝不能进 RPC
+ */
+export function createInputOf(params: {
+  scope: CreateScope
+  id: string
+  patch: AgentPatch
+}): {
+  scope: "user" | "project"
+  projectPath?: string
+  id: string
+  description: string
+  body: string
+  model?: string
+  color?: string
+  hidden?: boolean
+  steps?: number
+  matrix: PermissionMatrix
+} {
+  const out: ReturnType<typeof createInputOf> = {
+    scope: params.scope.kind === "user" ? "user" : "project",
+    id: params.id,
+    description: params.patch.description,
+    body: params.patch.body,
+    matrix: params.patch.matrix,
+  }
+  if (params.scope.kind === "project" && params.scope.projectPath !== undefined) {
+    out.projectPath = params.scope.projectPath
+  }
+  if (params.patch.model !== undefined) out.model = params.patch.model
+  if (params.patch.color !== undefined) out.color = params.patch.color
+  if (params.patch.hidden !== undefined) out.hidden = params.patch.hidden
+  if (params.patch.steps !== undefined) out.steps = params.patch.steps
+  return out
 }

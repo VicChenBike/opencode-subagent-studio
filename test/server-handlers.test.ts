@@ -161,3 +161,49 @@ test("migratePreview output encodes with an empty change list", () => {
   const payload = { before: "a", after: "a", changes: [] }
   assert.doesNotThrow(() => E.Schema.encodeUnknownSync(toEffectSchema(Subagents.methods.migratePreview.output) as never)(payload))
 })
+
+// P2-T7：新建流程端到端（createInputOf → createAgentFile → 列表出现 → 重名被拒）
+test("create flow writes a v2 file, then shows up in the list and rejects a duplicate", withTempAgents({}, async (dir) => {
+  const { createAgentFile, listAgents } = await import("../src/core/agent-store.ts")
+  const { createInputOf } = await import("../src/gui/editor-form.ts")
+  const matrix = {
+    defaultEffect: "allow" as const,
+    actions: { read: "allow", glob: "allow", grep: "allow", edit: "allow", shell: "allow",
+      webfetch: "allow", websearch: "allow", skill: "allow", subagent: "allow", question: "allow" } as const,
+  }
+  // 与 editor.tsx 完全相同的入参构造
+  const input = createInputOf({
+    scope: { kind: "user" },
+    id: "my-agent",
+    patch: { description: "My agent", body: "Do the thing.\n", model: "acme/standard#high", hidden: true, steps: 6, matrix },
+  })
+  assert.equal("projectPath" in input, false)
+
+  const filePath = await createAgentFile({
+    dir,
+    id: input.id,
+    description: input.description,
+    body: input.body,
+    model: input.model,
+    hidden: input.hidden,
+    steps: input.steps,
+    matrix: input.matrix,
+  })
+
+  const raw = await import("node:fs/promises").then((m) => m.readFile(filePath, "utf8"))
+  assert.ok(raw.startsWith("---\ndescription: My agent\nmode: subagent\nmodel: acme/standard#high\n"))
+  assert.ok(raw.includes("hidden: true"))
+  assert.ok(raw.includes("steps: 6"))
+  assert.ok(!raw.includes("name:"), "v2 files never carry a name field")
+  assert.ok(raw.endsWith("Do the thing.\n"))
+
+  // 列表能立刻看到（保存后 GUI 会 refetch）
+  const list = await listAgents(dir)
+  assert.deepEqual(list.map((a) => a.id), ["my-agent"])
+
+  // 重名（no-clobber）
+  await assert.rejects(
+    () => createAgentFile({ dir, id: "my-agent", description: "again", body: "x\n", matrix }),
+    (e: Error & { code?: string }) => e.code === "exists",
+  )
+}))
