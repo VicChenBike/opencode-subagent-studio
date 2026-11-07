@@ -1,8 +1,11 @@
-// src/gui/i18n.ts —— 完整文案目录。en 必填（宿主兜底），zh-CN 默认语言。
+// src/gui/i18n.ts —— 完整文案目录。en 必填（宿主兜底）。
 // 占位符用 {{name}}：宿主 Params 的插值语法是双花括号（见 @opencode/plugin/dist/gui/core.d.ts
 // "Values a message interpolates: {{name}} in a template reads params.name"），计划 §0.4 允许按实测调整模板写法、键名不变。
-export const catalog = {
-  en: {
+//
+// 语言键：桌面端 2.2.5 的界面语言 key 是 `zh`，映射出的 BCP-47 标签是 `zh-Hans`，
+// 宿主用它去 catalog 里查（`<html lang>` 也是 zh-Hans）。只注册 zh-CN 会落空并回退 en，
+// 所以中文词典同时注册在 zh-Hans / zh / zh-CN 三个键上，指向同一份。
+const en = {
     "common.save": "Save",
     "common.cancel": "Cancel",
     "common.delete": "Delete",
@@ -108,8 +111,9 @@ export const catalog = {
     "error.exists": "A file with this name already exists",
     "error.notFound": "File not found",
     "error.conflict": "File was modified elsewhere",
-  },
-  "zh-CN": {
+} as const
+
+const zhHans = {
     "common.save": "保存",
     "common.cancel": "取消",
     "common.delete": "删除",
@@ -215,5 +219,13 @@ export const catalog = {
     "error.exists": "同名文件已存在",
     "error.notFound": "文件不存在",
     "error.conflict": "文件已被其他修改",
-  },
+} as const
+
+export const catalog = {
+  en,
+  // 宿主实际查找的键：zh（界面语言 key）与 zh-Hans（映射后的 BCP-47 标签）
+  "zh-Hans": zhHans,
+  zh: zhHans,
+  // 别名：与计划原稿的 zh-CN 保持一致，指向同一份词典
+  "zh-CN": zhHans,
 } as const
