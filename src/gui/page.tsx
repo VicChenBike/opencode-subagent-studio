@@ -5,6 +5,7 @@ import { Subagents } from "../rpc"
 import type { AgentSummary, BuiltinSummary, ListOutput } from "../rpc"
 import { listViewState, errorMessage } from "./list-state"
 import { EditorPage, type EditorTarget } from "./editor"
+import { trashAgent } from "./trash-flow"
 
 type Scope =
   | { kind: "user" }
@@ -99,6 +100,25 @@ export function Page(_props: { target?: string }) {
           existingIds={() => (data()?.agents ?? []).map((a) => a.id)}
           onBack={() => setEditorTarget(null)}
           onSaved={() => { setEditorTarget(null); void refetch() }}
+          onDelete={() => {
+            const target = editorTarget()
+            if (!target?.path || !target.id) return
+            void (async () => {
+              const result = await trashAgent(
+                {
+                  confirm: (input) => ctx.dialogs.confirm(input),
+                  remove: (input) => ctx.client.rpc(Subagents).remove(input) as unknown as Promise<{ trashPath: string }>,
+                  toast: (input) => ctx.toast.show(input),
+                  t: ctx.t,
+                },
+                { id: target.id!, path: target.path! },
+              )
+              if (result === "deleted") {
+                setEditorTarget(null)
+                void refetch()
+              }
+            })()
+          }}
         />
       }
     >
@@ -147,7 +167,7 @@ export function Page(_props: { target?: string }) {
         </Match>
 
         <Match when={view().kind === "rows"}>
-          <For each={filtered()}>{(agent) => <AgentRow agent={agent} onOpen={() => openEditor(agent)} />}</For>
+          <For each={filtered()}>{(agent) => <AgentRow agent={agent} onOpen={() => openEditor(agent)} onDeleted={() => void refetch()} />}</For>
         </Match>
       </Switch>
 
@@ -162,7 +182,7 @@ export function Page(_props: { target?: string }) {
   )
 }
 
-function AgentRow(props: { agent: AgentSummary; onOpen?: () => void }) {
+function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?: () => void }) {
   const ctx = usePlugin()
   return (
     <div
@@ -200,6 +220,27 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void }) {
           {props.agent.description}
         </span>
       </div>
+      {/* goal.md §10：删除 = 移入同级回收站，二次确认 */}
+      <ctx.ui.IconButton
+        icon="trash"
+        label={ctx.t("common.delete")}
+        variant="ghost-muted"
+        onClick={(event) => {
+          event.stopPropagation()
+          void (async () => {
+            const result = await trashAgent(
+              {
+                confirm: (input) => ctx.dialogs.confirm(input),
+                remove: (input) => ctx.client.rpc(Subagents).remove(input) as unknown as Promise<{ trashPath: string }>,
+                toast: (input) => ctx.toast.show(input),
+                t: ctx.t,
+              },
+              props.agent,
+            )
+            if (result === "deleted") props.onDeleted?.()
+          })()
+        }}
+      />
     </div>
   )
 }
