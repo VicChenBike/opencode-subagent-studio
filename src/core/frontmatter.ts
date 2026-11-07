@@ -34,7 +34,23 @@ export function parseAgentFile(raw: string): ParsedFile {
   // frontmatter 不是映射（纯标量 / 数组 / null / 解析失败）时按空 meta 处理，
   // 避免单个畸形文件让整份目录扫描抛错。
   const meta = isPlainMapping(js) ? (js as Record<string, unknown>) : {}
-  return { meta, body, format: detectFormat(meta), raw }
+  // 先按原始字段判格式，再做 V1 归一化——否则归一化写入的 `disabled` 会让 V1 文件被误判成 V2
+  const format = detectFormat(meta)
+  normalizeV1Keys(meta)
+  return { meta, body, format, raw }
+}
+
+/**
+ * V1 → V2 字段归一化（只读视图，不改文件）。
+ *
+ * AGENTS.md §3.4：V1 用 `disable`，V2 用 `disabled`。列表与开关只认 `disabled`，
+ * 若不归一化，一个 `disable: true` 的 V1 文件会被显示成「启用」——与真值相反。
+ * V2 已有的 `disabled` 优先，不被同名的 `disable` 覆盖。
+ */
+function normalizeV1Keys(meta: Record<string, unknown>): void {
+  if (!("disabled" in meta) && typeof meta.disable === "boolean") {
+    meta.disabled = meta.disable
+  }
 }
 
 // ---------- 序列化 ----------

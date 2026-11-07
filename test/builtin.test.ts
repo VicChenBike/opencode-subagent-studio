@@ -99,3 +99,41 @@ test("a builtin without an override keeps whatever model it already has", () => 
   applyBuiltinOverrides(editor, { "builtin-model.explore": "acme/mini" })
   assert.equal(calls.length, 0, "general has no override, so it must not be touched")
 })
+
+// P1-1（审查）：宿主 Transform 回调是同步的 `(input) => void`。
+// 若回调内部 await storage，第一个 await 挂起后 applyBuiltinOverrides 会落到 transform pass
+// 之后执行，覆盖可能不生效或非确定生效。所以 setup 时把覆盖读进闭包缓存，回调同步读缓存。
+test("createBuiltinTransform applies overrides synchronously from a cache", async () => {
+  const { createBuiltinTransform } = await import("../src/core/builtin.ts")
+  const cache = new Map<string, string>([["builtin-model.general", "acme/standard#high"]])
+  const transform = createBuiltinTransform(() => cache)
+  const agents: AgentInfoLike[] = [{ ...general }]
+  const { calls, editor } = fakeEditor(agents)
+  // 关键：不 await —— 同步调用结束时就应已经产生 update
+  const returned = transform(editor)
+  assert.equal(returned, undefined, "the transform callback must return void, not a promise")
+  assert.equal(calls.length, 1, "the override must be applied before the callback returns")
+})
+
+test("the transform cache reflects a new pick without waiting for storage", async () => {
+  const { createBuiltinTransform, applyBuiltinOverrideToCache } = await import("../src/core/builtin.ts")
+  const cache = new Map<string, string>()
+  const transform = createBuiltinTransform(() => cache)
+  applyBuiltinOverrideToCache(cache, "general", "acme/mini")
+  const { calls, editor } = fakeEditor([{ ...general }])
+  transform(editor)
+  assert.equal(calls.length, 1)
+  const agent = { ...general }
+  calls[0].fn(agent)
+  assert.deepEqual(agent.model, { id: "mini", providerID: "acme" })
+})
+
+test("clearing the cache entry makes the transform skip the builtin", async () => {
+  const { createBuiltinTransform, applyBuiltinOverrideToCache } = await import("../src/core/builtin.ts")
+  const cache = new Map<string, string>([["builtin-model.general", "acme/standard"]])
+  const transform = createBuiltinTransform(() => cache)
+  applyBuiltinOverrideToCache(cache, "general", undefined)
+  const { calls, editor } = fakeEditor([{ ...general }])
+  transform(editor)
+  assert.equal(calls.length, 0, "inherit-default must stop rewriting the model")
+})

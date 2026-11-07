@@ -73,3 +73,38 @@ export function applyBuiltinOverrides(
     })
   }
 }
+
+/** 覆盖值的闭包缓存：storage 是异步的，transform 回调必须同步，所以在 setup 时先读进来。 */
+export type OverrideCache = Map<string, string>
+
+/** 同步更新缓存（「继承默认」= 删除键）。storage 的异步写入由调用方并行发起。 */
+export function applyBuiltinOverrideToCache(
+  cache: OverrideCache,
+  id: BuiltinId,
+  model: string | undefined,
+): void {
+  const key = overrideKeyOf(id)
+  if (model === undefined || model === "") cache.delete(key)
+  else cache.set(key, model)
+}
+
+/**
+ * 构造同步的 transform 回调（P1-1）。
+ *
+ * 宿主类型（@opencode/plugin/dist/promise/agent.d.ts）把 Transform 定义为同步 `(input) => void`。
+ * 回调里一旦出现 await，执行会在第一个挂起处让出，applyBuiltinOverrides 就落到 transform pass
+ * 之后——覆盖可能不生效或非确定生效。所以这里只读同步缓存，不碰 storage。
+ */
+export function createBuiltinTransform(
+  getCache: () => OverrideCache,
+): (editor: AgentEditorLike) => void {
+  return (editor) => {
+    const cache = getCache()
+    const overrides: Record<string, string | undefined> = {}
+    for (const id of BUILTIN_IDS) {
+      const value = cache.get(overrideKeyOf(id))
+      if (value !== undefined) overrides[overrideKeyOf(id)] = value
+    }
+    applyBuiltinOverrides(editor, overrides)
+  }
+}

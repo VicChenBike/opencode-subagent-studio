@@ -53,8 +53,22 @@ export async function renameAgent(
   agent: { id: string; path: string },
   newId: string,
 ): Promise<RenameResult> {
-  // 非法 / 保留 / 未改变：不弹确认也不发请求
-  if (validateNewId(newId, agent.id) !== undefined) return "invalid"
+  // 非法 / 保留 / 未改变：不弹确认也不发请求，但必须给出可见原因（P3-d）
+  const invalid = validateNewId(newId, agent.id)
+  if (invalid !== undefined) {
+    deps.toast({
+      title: deps.t(
+        invalid === "invalid"
+          ? "editor.invalidId"
+          : invalid === "reserved"
+            ? "editor.reservedId"
+            : "editor.duplicateId",
+        invalid === "reserved" || invalid === "unchanged" ? { id: newId } : undefined,
+      ),
+      variant: "error",
+    })
+    return "invalid"
+  }
   const ok = await deps.confirm(renameConfirmCopy(deps.t, agent.id))
   if (!ok) return "cancelled"
   try {

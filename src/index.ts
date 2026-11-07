@@ -16,8 +16,10 @@ import {
 import { migratePreview } from "./core/frontmatter.ts"
 import { runWithDeclaredErrors } from "./core/rpc-errors.ts"
 import { createChangeDebouncer, watchAgentsDir } from "./core/watch.ts"
-import { applyBuiltinOverrides, BUILTIN_IDS, overrideKeyOf } from "./core/builtin.ts"
-import type { AgentEditorLike } from "./core/builtin.ts"
+import {
+  applyBuiltinOverrideToCache, BUILTIN_IDS, createBuiltinTransform, overrideKeyOf,
+} from "./core/builtin.ts"
+import type { OverrideCache } from "./core/builtin.ts"
 import type { AgentsWatcher } from "./core/watch.ts"
 import type { ErrorContextLike } from "./core/rpc-errors.ts"
 
@@ -48,34 +50,39 @@ export default Plugin.define({
     // ---------- 内置代理模型覆盖（goal.md §11） ----------
     // 覆盖值存插件自己的 storage，键 `builtin-model.<id>`；删除键 = 继承默认。
     // 只改模型，提示词与权限不动（applyBuiltinOverrides 只写 agent.model）。
-    const readBuiltinOverrides = async (): Promise<BuiltinOverridesOutput> => {
+    //
+    // P1-1（审查）：宿主的 Transform 回调是同步 `(input) => void`。回调里若 await storage，
+    // 第一个挂起处就让出了，applyBuiltinOverrides 会落到 transform pass 之后执行。
+    // 所以 setup 时先把覆盖读进闭包缓存，回调只同步读缓存。
+    const overrideCache: OverrideCache = new Map()
+    for (const id of BUILTIN_IDS) {
+      const value = await ctx.storage.get(overrideKeyOf(id))
+      if (typeof value === "string" && value.length > 0) overrideCache.set(overrideKeyOf(id), value)
+    }
+
+    const readBuiltinOverrides = (): BuiltinOverridesOutput => {
       const out: BuiltinOverridesOutput = {}
       for (const id of BUILTIN_IDS) {
-        const value = await ctx.storage.get(overrideKeyOf(id))
-        if (typeof value === "string" && value.length > 0) out[id] = value
+        const value = overrideCache.get(overrideKeyOf(id))
+        if (value !== undefined) out[id] = value
       }
       return out
     }
 
+    // 同步改缓存（transform 立刻能看到），storage 的写入并行进行。
     const writeBuiltinOverride = async (id: (typeof BUILTIN_IDS)[number], model?: string): Promise<void> => {
+      applyBuiltinOverrideToCache(overrideCache, id, model)
       if (model === undefined || model === "") {
-        // 「继承默认」= 删除键
         await ctx.storage.remove(overrideKeyOf(id))
         return
       }
       await ctx.storage.set(overrideKeyOf(id), model)
     }
 
-    // transform 在每次 agent 重载后重放：读当前覆盖并注入
-    const transformReg = await ctx.agent.transform(async (editor) => {
-      // applyBuiltinOverrides 只认 `builtin-model.<id>` 形式的键，这里先转成该形状
-      const current = await readBuiltinOverrides()
-      const overrides: Record<string, string | undefined> = {}
-      for (const id of BUILTIN_IDS) {
-        if (current[id] !== undefined) overrides[overrideKeyOf(id)] = current[id]
-      }
-      applyBuiltinOverrides(editor as unknown as AgentEditorLike, overrides)
-    })
+    // transform 在每次 agent 重载后重放：同步读缓存并注入
+    const transformReg = await ctx.agent.transform(
+      createBuiltinTransform(() => overrideCache) as unknown as (editor: unknown) => void,
+    )
 
     // ---------- 文件监听（goal.md §12.1）：去抖 300ms → reload → changed ----------
     let projectWatcher: AgentsWatcher | null = null

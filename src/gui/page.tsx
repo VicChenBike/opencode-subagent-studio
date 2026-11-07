@@ -3,7 +3,7 @@ import { createSignal, createResource, createMemo, onCleanup, Show, Switch, Matc
 import { usePlugin } from "@opencode/plugin/gui"
 import { Subagents } from "../rpc"
 import type { AgentSummary, BuiltinSummary, ListOutput } from "../rpc"
-import { listViewState, errorMessage, changedAction } from "./list-state"
+import { listViewState, errorMessage, changedAction, agentRowState } from "./list-state"
 import { EditorPage, type EditorTarget } from "./editor"
 import { trashAgent } from "./trash-flow"
 import { toggleDisabled } from "./disable-flow"
@@ -200,13 +200,15 @@ export function Page(_props: { target?: string }) {
 
 function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?: () => void; onChanged?: () => void }) {
   const ctx = usePlugin()
+  // 徽标 / 开关 / 变灰三处统一从一处派生，避免各自判定走偏（goal.md §10）
+  const rowState = () => agentRowState(props.agent)
   return (
     <div
       onClick={() => props.onOpen?.()}
       style={{
         display: "flex", gap: "8px", "align-items": "center", padding: "8px", "border-radius": "8px",
         cursor: props.onOpen ? "pointer" : "default",
-        opacity: props.agent.disabled ? 0.5 : 1,
+        opacity: rowState().dimmed ? 0.5 : 1,
       }}
     >
       <span style={{
@@ -227,7 +229,7 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
               {ctx.t("list.hidden")}
             </span>
           </Show>
-          <Show when={props.agent.disabled}>
+          <Show when={rowState().showDisabledBadge}>
             <span style={{ "font-size": "12px", padding: "1px 6px", border: "1px solid", "border-radius": "6px", opacity: 0.5 }}>
               {ctx.t("list.disabled")}
             </span>
@@ -237,11 +239,14 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
           {props.agent.description}
         </span>
       </div>
-      {/* goal.md §10：开关写 disabled true/false；V1 先走迁移预览 */}
+      {/* goal.md §10：开关写 disabled true/false；V1 先走迁移预览。
+          P3-a：Ui.Switch 的 onChange 只给 boolean、拿不到事件，所以用容器拦住冒泡，
+          否则点开关会同时触发行的 onClick 跳进编辑页。 */}
+      <span onClick={(event) => event.stopPropagation()}>
       <ctx.ui.Switch
         label={ctx.t("list.disabled")}
         hideLabel
-        checked={props.agent.disabled}
+        checked={rowState().switchChecked}
         onChange={(checked) => {
           void (async () => {
             const result = await toggleDisabled(
@@ -273,6 +278,7 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
           })()
         }}
       />
+      </span>
       {/* goal.md §10：删除 = 移入同级回收站，二次确认 */}
       <ctx.ui.IconButton
         icon="trash"
@@ -312,9 +318,11 @@ function BuiltinRow(props: { builtin: BuiltinSummary; onChanged?: () => void }) 
       onPick: (model, variant) => {
         void (async () => {
           try {
+            // P3-e：继承默认时不发送 model 键（避免传输层对显式 undefined 的校验差异）
+            const nextModel = model === undefined ? undefined : variant ? `${model}#${variant}` : model
             await ctx.client.rpc(Subagents).setBuiltinModel({
               id: props.builtin.id,
-              model: model === undefined ? undefined : variant ? `${model}#${variant}` : model,
+              ...(nextModel === undefined ? {} : { model: nextModel }),
             })
             ctx.toast.show({ title: ctx.t("toast.saved"), variant: "success" })
             props.onChanged?.()

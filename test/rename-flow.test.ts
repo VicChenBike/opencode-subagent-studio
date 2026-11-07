@@ -74,6 +74,30 @@ test("renameAgent refuses to call the RPC for an invalid id", async () => {
   assert.equal(calls.confirm.length, 0, "no point confirming an invalid id")
 })
 
+// P3-d：无效输入不能静默失败，必须给出可见提示
+test("renameAgent explains why an invalid id was rejected", async () => {
+  const { calls, deps } = fakeDeps()
+  await renameAgent(deps, { id: "old-id", path: "C:/agents/old-id.md" }, "Bad_Id")
+  assert.equal(calls.toast.length, 1, "an invalid id must produce a toast")
+  const toast = calls.toast[0] as { title: string; variant?: string }
+  assert.equal(toast.variant, "error")
+  assert.equal(toast.title, "editor.invalidId")
+})
+
+test("renameAgent explains a reserved id", async () => {
+  const { calls, deps } = fakeDeps()
+  await renameAgent(deps, { id: "old-id", path: "C:/agents/old-id.md" }, "general")
+  const toast = calls.toast[0] as { title: string }
+  // fake 的 t 会把 params 拼进键名，这里只断言前缀
+  assert.ok(toast.title.startsWith("editor.reservedId"), `got ${toast.title}`)
+})
+
+test("renameAgent explains an unchanged id", async () => {
+  const { calls, deps } = fakeDeps()
+  await renameAgent(deps, { id: "same", path: "C:/agents/same.md" }, "same")
+  assert.equal(calls.toast.length, 1, "an unchanged id must not fail silently")
+})
+
 test("renameAgent surfaces a target-exists failure", async () => {
   const { calls, deps } = fakeDeps({
     renameError: Object.assign(new Error("target already exists"), { type: "exists" }),

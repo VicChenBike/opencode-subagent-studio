@@ -60,3 +60,25 @@ export function changedAction(input: {
 }): "refetch" | "notify" {
   return input.editorOpen ? "notify" : "refetch"
 }
+
+export interface AgentRowState {
+  /** 行内「已停用」徽标是否显示 */
+  showDisabledBadge: boolean
+  /** 停用开关是否处于打开态 */
+  switchChecked: boolean
+  /** 行是否降低不透明度 */
+  dimmed: boolean
+}
+
+/**
+ * 行级显示状态（goal.md §10）。
+ *
+ * 三种输入必须都判对：无 disabled 字段（= 启用）、`disabled: false`（= 启用）、
+ * `disabled: true`（= 停用）。桌面端曾出现全部 7 行都显示「已停用」而文件真值全是启用，
+ * 所以这里用严格的 `=== true` 而不是 truthy 判断，并把三个派生值收在一处，
+ * 避免徽标 / 开关 / 变灰三处各自判定而走偏。
+ */
+export function agentRowState(agent: { disabled?: boolean }): AgentRowState {
+  const disabled = agent.disabled === true
+  return { showDisabledBadge: disabled, switchChecked: disabled, dimmed: disabled }
+}
