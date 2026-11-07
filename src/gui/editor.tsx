@@ -3,9 +3,10 @@
 import { createSignal, createMemo, Show, For, onMount } from "solid-js"
 import { usePlugin } from "@opencode/plugin/gui"
 import { Subagents, ACTIONS } from "../rpc"
-import type { AgentPatch, PermissionMatrix, ReadOutput } from "../rpc"
+import type { AgentPatch, PermissionMatrix, ReadOutput, ProviderSummary, ModelsOutput } from "../rpc"
 import { matrixFromRules } from "../core/permissions.ts"
 import { splitModelRef, buildPatch, optionalFieldsOf, validateEditor } from "./editor-form"
+import { variantsOf } from "./model-picker-logic"
 import { PermissionGrid } from "./permission-grid"
 import { openModelPicker } from "./model-picker"
 
@@ -351,27 +352,21 @@ export function EditorPage(props: {
   )
 }
 
-// 思考深度下拉：选项来自该模型的 variants（goal.md §6.3）
+// 思考深度下拉：选项来自该模型的 variants（goal.md §6.3），复用 model-picker-logic 的推导
 function DepthSelect(props: { model?: string; variant?: string; onPick: (v?: string) => void }) {
   const ctx = usePlugin()
-  const [variants, setVariants] = createSignal<string[]>([])
+  const [providers, setProviders] = createSignal<ProviderSummary[]>([])
   onMount(() => {
     void (async () => {
-      if (!props.model) return
       try {
-        const res = (await ctx.client.rpc(Subagents).models({})) as unknown as {
-          providers: { id: string; models: { id: string; variants: string[] }[] }[]
-        }
-        const slash = props.model.indexOf("/")
-        const pid = props.model.slice(0, slash)
-        const mid = props.model.slice(slash + 1)
-        const found = res.providers.find((p) => p.id === pid)?.models.find((m) => m.id === mid)
-        setVariants(found?.variants ?? [])
+        const res = (await ctx.client.rpc(Subagents).models({})) as unknown as ModelsOutput
+        setProviders(res.providers)
       } catch {
-        setVariants([])
+        setProviders([])
       }
     })()
   })
+  const variants = createMemo(() => variantsOf(providers(), props.model))
   return (
     <Show when={variants().length > 0} fallback={<span style={{ opacity: 0.5 }}>{ctx.t("editor.depth.none")}</span>}>
       <ctx.ui.Menu
