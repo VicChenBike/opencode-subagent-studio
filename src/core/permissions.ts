@@ -1,14 +1,7 @@
 // src/core/permissions.ts —— 三态矩阵 ↔ permissions 规则数组（纯逻辑，goal.md §8）
 // 共享类型与常量统一从 rpc.ts 导入（单一契约源，禁止双份定义）
 import { ACTIONS, type Effect, type ActionName, type PermissionRule, type PermissionMatrix } from "../rpc.ts"
-
-// V1 动作名 → V2 动作名（opencode.ai/v2/docs/migrate-v1）
-const V1_ACTION_RENAME: Record<string, string> = {
-  bash: "shell",
-  task: "subagent",
-  write: "edit",
-  patch: "edit",
-}
+import { V1_ACTION_RENAME } from "./migrate-shared.ts"
 
 // goal.md §8.4：OpenCode 对 read 的默认 .env 保护
 const ENV_RULES: readonly PermissionRule[] = [
