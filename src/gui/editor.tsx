@@ -9,6 +9,7 @@ import { buildPatch, validateEditor, createInputOf, conflictAction, isConflictEr
 import { variantsOf } from "./model-picker-logic"
 import { saveStep } from "./migration-logic"
 import { MigrationDialog } from "./migration-dialog"
+import { renameAgent } from "./rename-flow"
 import { PermissionGrid } from "./permission-grid"
 import { openModelPicker } from "./model-picker"
 
@@ -274,6 +275,36 @@ export function EditorPage(props: {
             fallback={
               <span style={{ opacity: 0.8 }}>
                 {id()} <span style={{ opacity: 0.5, "font-size": "12px" }}>{ctx.t("editor.nameReadonly")}</span>
+                {/* goal.md §6.1：改 ID 会让引用失效，所以走带警告的二次确认 */}
+                <ctx.ui.Button
+                  variant="ghost"
+                  size="small"
+                  icon="edit"
+                  onClick={() => {
+                    void (async () => {
+                      const next = await ctx.dialogs.prompt({
+                        title: ctx.t("editor.rename.title"),
+                        description: ctx.t("editor.rename.desc"),
+                        placeholder: ctx.t("editor.name.hint"),
+                        value: id(),
+                      })
+                      if (next === undefined) return
+                      const result = await renameAgent(
+                        {
+                          confirm: (input) => ctx.dialogs.confirm(input),
+                          rename: (input) => ctx.client.rpc(Subagents).rename(input) as unknown as Promise<{ path: string }>,
+                          toast: (input) => ctx.toast.show(input),
+                          t: ctx.t,
+                        },
+                        { id: id(), path: props.target.path! },
+                        next,
+                      )
+                      if (result === "renamed") props.onSaved()
+                    })()
+                  }}
+                >
+                  {ctx.t("common.rename")}
+                </ctx.ui.Button>
               </span>
             }
           >
