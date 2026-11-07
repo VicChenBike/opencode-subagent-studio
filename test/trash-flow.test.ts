@@ -68,6 +68,7 @@ test("trashAgent reports the failure without a success toast", async () => {
   const toast = calls.toast[0] as { title: string; variant: string; description?: string }
   assert.equal(toast.variant, "error")
   assert.equal(toast.title, "common.error")
+  // 裸 Error 没有 type 字段，无从映射错误码，保留原始 message
   assert.equal(toast.description, "not_found")
 })
 
@@ -78,7 +79,18 @@ test("trashAgent surfaces the host error message, not an object dump", async () 
   })
   await trashAgent(deps, agent)
   const toast = calls.toast[0] as { description: string }
-  assert.equal(toast.description, "path outside allowed roots")
+  // invalid_path 有专门文案（P3-T8）
+  assert.equal(toast.description, "error.invalidPath")
+})
+
+test("trashAgent falls back to the raw message for codes without copy", async () => {
+  const { calls, deps } = fakeDeps({
+    confirmed: true,
+    removeError: Object.assign(new Error("bad id"), { type: "invalid_id" }),
+  })
+  await trashAgent(deps, agent)
+  const toast = calls.toast[0] as { description: string }
+  assert.equal(toast.description, "bad id", "codes without dedicated copy keep the server message")
 })
 
 test("the success toast is only emitted once per delete", async () => {

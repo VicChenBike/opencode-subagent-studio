@@ -104,7 +104,7 @@ test("a failure reports an error toast and no success toast", async () => {
   const toast = calls.toast[0] as { title: string; variant: string; description?: string }
   assert.equal(toast.variant, "error")
   assert.equal(toast.title, "common.error")
-  assert.equal(toast.description, "not_found")
+  assert.equal(toast.description, "error.notFound")
 })
 
 test("a v1 agent being enabled skips the migration because nothing is written", async () => {

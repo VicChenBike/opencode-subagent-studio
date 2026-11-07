@@ -106,11 +106,55 @@ test("renameAgent surfaces a target-exists failure", async () => {
   assert.equal(result, "failed")
   const toast = calls.toast[0] as { title: string; variant: string; description?: string }
   assert.equal(toast.variant, "error")
-  assert.equal(toast.description, "target already exists")
+  // P3-T8：已知错误码映射成 i18n 文案（fake 的 t 原样返回键名）
+  assert.equal(toast.description, "error.exists")
 })
 
 test("a successful rename returns the new path so the caller can follow it", async () => {
   const { deps } = fakeDeps()
   const result = await renameAgent(deps, { id: "old-id", path: "C:/agents/old-id.md" }, "new-id")
   assert.equal(result, "renamed")
+})
+
+// P3 遗留：顺序对齐计划——先弹「ID 会改变、引用会失效」的警告确认，再让用户输入新 ID。
+// 先输入后确认会让用户在不知情的情况下已经想好了新名字，警告的教育意义变弱。
+test("renameAgentWithPrompt warns first, then asks for the new id", async () => {
+  const { renameAgentWithPrompt } = await import("../src/gui/rename-flow.ts")
+  const order: string[] = []
+  const deps = {
+    confirm: async (input: { title: string }) => { order.push(`confirm:${input.title}`); return true },
+    prompt: async () => { order.push("prompt"); return "new-id" },
+    rename: async (input: unknown) => { order.push("rename"); return { path: "C:/agents/new-id.md" } },
+    toast: (input: unknown) => { order.push("toast") },
+    t: (key: string) => key,
+  }
+  const result = await renameAgentWithPrompt(deps, { id: "old-id", path: "C:/agents/old-id.md" })
+  assert.equal(result, "renamed")
+  assert.deepEqual(order, ["confirm:editor.rename.title", "prompt", "rename", "toast"])
+})
+
+test("renameAgentWithPrompt stops when the warning is declined", async () => {
+  const { renameAgentWithPrompt } = await import("../src/gui/rename-flow.ts")
+  const order: string[] = []
+  const deps = {
+    confirm: async () => { order.push("confirm"); return false },
+    prompt: async () => { order.push("prompt"); return "new-id" },
+    rename: async () => { order.push("rename"); return { path: "x" } },
+    toast: () => { order.push("toast") },
+    t: (key: string) => key,
+  }
+  assert.equal(await renameAgentWithPrompt(deps, { id: "old-id", path: "p" }), "cancelled")
+  assert.deepEqual(order, ["confirm"], "declining the warning must not prompt for a name")
+})
+
+test("renameAgentWithPrompt stops when the prompt is dismissed", async () => {
+  const { renameAgentWithPrompt } = await import("../src/gui/rename-flow.ts")
+  const deps = {
+    confirm: async () => true,
+    prompt: async () => undefined,
+    rename: async () => { throw new Error("must not run") },
+    toast: () => {},
+    t: (key: string) => key,
+  }
+  assert.equal(await renameAgentWithPrompt(deps, { id: "old-id", path: "p" }), "cancelled")
 })

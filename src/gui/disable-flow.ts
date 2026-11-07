@@ -3,6 +3,7 @@
 // goal.md §10：开关写 `disabled: true/false`，false 时删除字段。
 // goal.md §5.3：对 V1 文件写 disabled 会触发整份切 V2 → 必须先弹迁移预览，
 // 用户确认后先 `update`（服务端整份迁移）再 `setDisabled`。
+import { errorDescription } from "./error-copy.ts"
 import type { AgentPatch, MigrateChange, ReadOutput } from "../rpc"
 import { patchFromRead } from "./editor-form.ts"
 
@@ -35,11 +36,6 @@ export interface DisableDeps {
 
 export type ToggleResult = "toggled" | "cancelled" | "failed"
 
-function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message
-  const message = (error as { message?: unknown })?.message
-  return typeof message === "string" ? message : String(error)
-}
 
 /**
  * 切换某个代理的停用状态。
@@ -72,7 +68,7 @@ export async function toggleDisabled(
   } catch (error) {
     deps.toast({
       title: deps.t("common.error"),
-      description: messageOf(error),
+      description: errorDescription(deps.t, error),
       variant: "error",
     })
     return "failed"

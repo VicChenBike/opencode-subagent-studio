@@ -1,5 +1,6 @@
 // src/gui/trash-flow.ts —— 回收站删除的 GUI 流程（依赖注入，可单测，无 DOM）。
 // goal.md §10：二次确认 → 移入同级 agents-trash → toast；调用方负责 reload 与返回列表。
+import { errorDescription } from "./error-copy.ts"
 import type { RemoveInput, RemoveOutput } from "../rpc"
 
 export interface TrashDeps {
@@ -32,11 +33,6 @@ export function deleteConfirmCopy(
   }
 }
 
-function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message
-  const message = (error as { message?: unknown })?.message
-  return typeof message === "string" ? message : String(error)
-}
 
 /**
  * 删除 = 移入回收站。
@@ -56,7 +52,7 @@ export async function trashAgent(
   } catch (error) {
     deps.toast({
       title: deps.t("common.error"),
-      description: messageOf(error),
+      description: errorDescription(deps.t, error),
       variant: "error",
     })
     return "failed"

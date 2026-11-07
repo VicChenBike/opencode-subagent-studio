@@ -9,7 +9,8 @@ import { buildPatch, validateEditor, createInputOf, conflictAction, isConflictEr
 import { variantsOf } from "./model-picker-logic"
 import { saveStep } from "./migration-logic"
 import { MigrationDialog } from "./migration-dialog"
-import { renameAgent } from "./rename-flow"
+import { renameAgentWithPrompt } from "./rename-flow"
+import { errorDescription } from "./error-copy"
 import { PermissionGrid } from "./permission-grid"
 import { openModelPicker } from "./model-picker"
 
@@ -84,7 +85,7 @@ export function EditorPage(props: {
           ),
         )
       } catch (e) {
-        setLoadError(String((e as { message?: string })?.message ?? e))
+        setLoadError(errorDescription(ctx.t, e))
       } finally {
         setLoading(false)
       }
@@ -159,7 +160,7 @@ export function EditorPage(props: {
     } catch (e) {
       ctx.toast.show({
         title: ctx.t("common.error"),
-        description: String((e as { message?: string })?.message ?? e),
+        description: errorDescription(ctx.t, e),
         variant: "error",
       })
     } finally {
@@ -197,7 +198,7 @@ export function EditorPage(props: {
     } catch (e) {
       ctx.toast.show({
         title: ctx.t("common.error"),
-        description: String((e as { message?: string })?.message ?? e),
+        description: errorDescription(ctx.t, e),
         variant: "error",
       })
     }
@@ -282,25 +283,25 @@ export function EditorPage(props: {
                   icon="edit"
                   onClick={() => {
                     void (async () => {
-                      const next = await ctx.dialogs.prompt({
-                        title: ctx.t("editor.rename.title"),
-                        description: ctx.t("editor.rename.desc"),
-                        placeholder: ctx.t("editor.name.hint"),
-                        value: id(),
-                      })
-                      if (next === undefined) return
-                      const result = await renameAgent(
+                      // 先弹「ID 会改变、引用会失效」的警告，再让用户输入新 ID
+                      const result = await renameAgentWithPrompt(
                         {
                           confirm: (input) => ctx.dialogs.confirm(input),
+                          prompt: (input) => ctx.dialogs.prompt(input),
                           rename: (input) => ctx.client.rpc(Subagents).rename(input) as unknown as Promise<{ path: string }>,
                           toast: (input) => ctx.toast.show(input),
                           t: ctx.t,
                         },
                         { id: id(), path: props.target.path! },
-                        next,
                       )
                       if (result === "renamed") props.onSaved()
-                    })()
+                    })().catch((err) => {
+                      ctx.toast.show({
+                        title: ctx.t("common.error"),
+                        description: errorDescription(ctx.t, err),
+                        variant: "error",
+                      })
+                    })
                   }}
                 >
                   {ctx.t("common.rename")}

@@ -2,6 +2,7 @@
 // goal.md §6.1：改 ID 会让其他代理或提示词里的引用失效 → 必须二次确认；
 // 目标已存在由服务端拒绝（exists），这里只负责把失败转成 toast。
 import { isValidAgentId, isReservedId } from "../core/ids.ts"
+import { errorDescription } from "./error-copy.ts"
 
 export interface RenameDeps {
   confirm: (input: { title: string; description?: string; danger?: boolean }) => Promise<boolean>
@@ -38,11 +39,6 @@ export function validateNewId(newId: string, currentId: string): NewIdError | un
   return undefined
 }
 
-function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message
-  const message = (error as { message?: unknown })?.message
-  return typeof message === "string" ? message : String(error)
-}
 
 /**
  * 重命名一个代理。
@@ -53,24 +49,33 @@ export async function renameAgent(
   agent: { id: string; path: string },
   newId: string,
 ): Promise<RenameResult> {
-  // 非法 / 保留 / 未改变：不弹确认也不发请求，但必须给出可见原因（P3-d）
+  // 先校验再确认：非法 / 保留 / 未改变的 ID 不值得让用户确认一次
   const invalid = validateNewId(newId, agent.id)
   if (invalid !== undefined) {
-    deps.toast({
-      title: deps.t(
-        invalid === "invalid"
-          ? "editor.invalidId"
-          : invalid === "reserved"
-            ? "editor.reservedId"
-            : "editor.duplicateId",
-        invalid === "reserved" || invalid === "unchanged" ? { id: newId } : undefined,
-      ),
-      variant: "error",
-    })
+    deps.toast({ title: invalidCopyKey(invalid, deps.t, newId), variant: "error" })
     return "invalid"
   }
   const ok = await deps.confirm(renameConfirmCopy(deps.t, agent.id))
   if (!ok) return "cancelled"
+  return renameConfirmed(deps, agent, newId)
+}
+
+function invalidCopyKey(
+  invalid: NewIdError,
+  t: RenameDeps["t"],
+  newId: string,
+): string {
+  if (invalid === "invalid") return t("editor.invalidId")
+  if (invalid === "reserved") return t("editor.reservedId", { id: newId })
+  return t("editor.duplicateId", { id: newId })
+}
+
+/** 已确认后的执行部分：校验 → rename → toast。renameAgentWithPrompt 复用它避免二次确认。 */
+export async function renameConfirmed(
+  deps: RenameDeps,
+  agent: { id: string; path: string },
+  newId: string,
+): Promise<RenameResult> {
   try {
     await deps.rename({ path: agent.path, newId })
     deps.toast({ title: deps.t("toast.renamed"), variant: "success" })
@@ -78,9 +83,43 @@ export async function renameAgent(
   } catch (error) {
     deps.toast({
       title: deps.t("common.error"),
-      description: messageOf(error),
+      description: errorDescription(deps.t, error),
       variant: "error",
     })
     return "failed"
   }
+}
+
+export interface RenamePromptDeps {
+  confirm: (input: { title: string; description?: string; danger?: boolean }) => Promise<boolean>
+  prompt: (input: { title: string; description?: string; placeholder?: string; value?: string }) => Promise<string | undefined>
+  rename: (input: { path: string; newId: string }) => Promise<{ path: string }>
+  toast: (input: {
+    title: string
+    description?: string
+    variant?: "default" | "success" | "error" | "loading"
+  }) => void
+  t: (key: string, params?: Record<string, string | number | boolean>) => string
+}
+
+/**
+ * 带输入框的完整重命名流程（P3 遗留：顺序对齐计划）。
+ *
+ * 顺序是「先警告、再输名字」：先让用户看到「ID 会改变、引用会失效」，
+ * 他若在此放弃就什么都没发生；反过来（先输名字再警告）会让人先想好新名字，
+ * 警告的教育作用被削弱，也更容易在误操作下改掉 ID。
+ */
+export async function renameAgentWithPrompt(
+  deps: RenamePromptDeps,
+  agent: { id: string; path: string },
+): Promise<RenameResult> {
+  const ok = await deps.confirm(renameConfirmCopy(deps.t, agent.id))
+  if (!ok) return "cancelled"
+  const next = await deps.prompt({
+    title: deps.t("editor.rename.title"),
+    placeholder: deps.t("editor.name.hint"),
+    value: agent.id,
+  })
+  if (next === undefined) return "cancelled"
+  return renameConfirmed(deps, agent, next)
 }

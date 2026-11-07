@@ -4,6 +4,7 @@ import { usePlugin } from "@opencode/plugin/gui"
 import { Subagents } from "../rpc"
 import type { AgentSummary, BuiltinSummary, ListOutput } from "../rpc"
 import { listViewState, errorMessage, changedAction, agentRowState } from "./list-state"
+import { errorDescription } from "./error-copy"
 import { EditorPage, type EditorTarget } from "./editor"
 import { trashAgent } from "./trash-flow"
 import { toggleDisabled } from "./disable-flow"
@@ -84,7 +85,8 @@ export function Page(_props: { target?: string }) {
     }),
   )
 
-  const errorText = () => errorMessage(data.error)
+  // 已知错误码优先用 i18n 文案，其余回退到原始 message（P3-T8）
+  const errorText = () => errorDescription(ctx.t, data.error) || errorMessage(data.error)
 
   const scopeLabel = () => {
     const s = scope()
@@ -133,7 +135,14 @@ export function Page(_props: { target?: string }) {
                 setEditorTarget(null)
                 void refetch()
               }
-            })()
+            })().catch((err) => {
+              // flow 内部只兜 RPC 失败；confirm / dialogs 抛错也要落到可见提示
+              ctx.toast.show({
+                title: ctx.t("common.error"),
+                description: errorDescription(ctx.t, err),
+                variant: "error",
+              })
+            })
           }}
         />
       }
@@ -275,7 +284,13 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
               checked,
             )
             if (result === "toggled") props.onChanged?.()
-          })()
+          })().catch((err) => {
+            ctx.toast.show({
+              title: ctx.t("common.error"),
+              description: errorDescription(ctx.t, err),
+              variant: "error",
+            })
+          })
         }}
       />
       </span>
@@ -297,7 +312,13 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
               props.agent,
             )
             if (result === "deleted") props.onDeleted?.()
-          })()
+          })().catch((err) => {
+            ctx.toast.show({
+              title: ctx.t("common.error"),
+              description: errorDescription(ctx.t, err),
+              variant: "error",
+            })
+          })
         }}
       />
     </div>
@@ -329,7 +350,7 @@ function BuiltinRow(props: { builtin: BuiltinSummary; onChanged?: () => void }) 
           } catch (err) {
             ctx.toast.show({
               title: ctx.t("common.error"),
-              description: String((err as { message?: string })?.message ?? err),
+              description: errorDescription(ctx.t, err),
               variant: "error",
             })
           }
