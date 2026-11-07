@@ -178,8 +178,10 @@ test("the catalog has no dead keys", () => {
   assert.deepEqual(dead, [], `unused keys: ${dead.join(", ")}`)
 })
 
-test("en and zh-Hans key sets match exactly", () => {
-  assert.deepEqual(Object.keys(catalog.en).sort(), Object.keys(catalog["zh-Hans"]).sort())
+// 「Subagent」统一命名后 page.title 只在 en 定义；zh-Hans 的键集 = en 键集去掉 page.title。
+test("zh-Hans key set matches en minus the unified page.title", () => {
+  const enKeys = Object.keys(catalog.en).filter((k) => k !== "page.title").sort()
+  assert.deepEqual(Object.keys(catalog["zh-Hans"]).sort(), enKeys)
 })
 
 test("every key's placeholders match between locales", () => {
