@@ -5,6 +5,15 @@
 // import 带显式 .ts 扩展名：测试经 node --experimental-strip-types 加载本模块，要求显式扩展。
 import { en } from "./en.ts"
 import { zh } from "./zh.ts"
+import { fr } from "./fr.ts"
+import { es } from "./es.ts"
+import { br } from "./br.ts"
+import { ru } from "./ru.ts"
+import { ar } from "./ar.ts"
+import { de } from "./de.ts"
+import { ja } from "./ja.ts"
+import { hi } from "./hi.ts"
+import { ko } from "./ko.ts"
 
 export const catalog = {
   en,
@@ -13,4 +22,14 @@ export const catalog = {
   "zh-Hans": zh,
   zh,
   "zh-CN": zh,
+  // 新增语言一律只注册宿主短码键（br = 宿主唯一的葡萄牙语选项 pt-BR）
+  fr,
+  es,
+  br,
+  ru,
+  ar,
+  de,
+  ja,
+  hi,
+  ko,
 } as const
