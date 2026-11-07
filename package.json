@@ -1,0 +1,28 @@
+{
+  "name": "opencode-subagent-manager",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./rpc": "./src/rpc.ts",
+    "./gui-experimental": "./dist/gui-experimental.cjs"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types test/",
+    "typecheck": "tsc --noEmit",
+    "build": "vite build",
+    "watch": "vite build --watch"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.2.5",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.2",
+    "solid-js": "1.9.17",
+    "typescript": "^5.9.3",
+    "vite": "7.3.7",
+    "vite-plugin-solid": "2.11.10"
+  }
+}
