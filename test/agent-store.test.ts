@@ -80,3 +80,22 @@ test("listAgents reports disabled and v2 format", async () => {
 test("listAgents on missing dir returns empty array", async () => {
   assert.deepEqual(await listAgents(path.join(tmp, "nope")), [])
 })
+
+// —— 回归：list RPC 500（真实桌面端）——
+// 宿主对 handler 输出按 output schema 做 encode，声明为 string 的可选字段若以
+// 「值为 undefined 的自有属性」形式存在，会抛 Expected string，整个 list 变 500。
+test("listAgents omits optional fields instead of leaving undefined own properties", async () => {
+  const dir = path.join(tmp, "agents")
+  fs.mkdirSync(dir, { recursive: true })
+  // 有 color/model
+  fs.writeFileSync(path.join(dir, "with-both.md"), "---\ndescription: B\nmode: subagent\ncolor: \"#ff0000\"\nmodel: acme/standard\n---\n\nx\n")
+  // 无 color / 无 model
+  fs.writeFileSync(path.join(dir, "plain.md"), "---\ndescription: P\nmode: subagent\n---\n\nx\n")
+  const list = await listAgents(dir)
+  const plain = list.find((a) => a.id === "plain")!
+  assert.equal(Object.prototype.hasOwnProperty.call(plain, "color"), false, "color must not be an own property when absent")
+  assert.equal(Object.prototype.hasOwnProperty.call(plain, "model"), false, "model must not be an own property when absent")
+  const both = list.find((a) => a.id === "with-both")!
+  assert.equal(both.color, "#ff0000")
+  assert.equal(both.model, "acme/standard")
+})

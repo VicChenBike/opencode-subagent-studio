@@ -75,18 +75,22 @@ export async function listAgents(dir: string): Promise<AgentSummaryRow[]> {
     const content = await fs.readFile(file, "utf8")
     const parsed = parseAgentFile(content)
     const st = await statOr(file)
-    out.push({
+    const row: AgentSummaryRow = {
       id,
       path: file,
       description: typeof parsed.meta.description === "string" ? parsed.meta.description : "",
-      color: typeof parsed.meta.color === "string" ? parsed.meta.color : undefined,
-      model: typeof parsed.meta.model === "string" ? parsed.meta.model : undefined,
       disabled: parsed.meta.disabled === true,
       hidden: parsed.meta.hidden === true,
       format: parsed.format,
       hash: hashOf(content),
       mtime: st?.mtime ?? 0,
-    })
+    }
+    // 可选字段只在有值时写入：宿主按 RPC output schema 对返回值做 encode，
+    // 声明为 string 的字段若以「值为 undefined 的自有属性」存在会抛 Expected string，
+    // 导致整个 list 请求 500（2026-11-07 桌面端实测）。
+    if (typeof parsed.meta.color === "string") row.color = parsed.meta.color
+    if (typeof parsed.meta.model === "string") row.model = parsed.meta.model
+    out.push(row)
   }
   return out.sort((a, b) => compareIds(a.id, b.id))
 }
