@@ -15,6 +15,8 @@ import {
 } from "./core/agent-store.ts"
 import { migratePreview } from "./core/frontmatter.ts"
 import { runWithDeclaredErrors } from "./core/rpc-errors.ts"
+import { createChangeDebouncer, watchAgentsDir } from "./core/watch.ts"
+import type { AgentsWatcher } from "./core/watch.ts"
 import type { ErrorContextLike } from "./core/rpc-errors.ts"
 
 // 未实现方法的桩：P3 逐个替换
@@ -41,6 +43,19 @@ function rootsForScopeOf(filePath: string): string[] {
 export default Plugin.define({
   id: "subagent-manager",
   async setup(ctx) {
+    // ---------- 文件监听（goal.md §12.1）：去抖 300ms → reload → changed ----------
+    let projectWatcher: AgentsWatcher | null = null
+
+    // 变化处理：重扫 → agent.reload() → 广播 changed。
+    // 去抖与错误隔离在 core/watch.ts（可单测），这里只关心顺序。
+    const changeDebouncer = createChangeDebouncer({
+      delayMs: 300,
+      run: async () => {
+        await ctx.agent.reload()
+        await reg.events.emit("changed", {})
+      },
+    })
+
     const reg = await ctx.rpc.register(Subagents, {
       list: async (input, context): Promise<ListOutput | unknown> => runWithDeclaredErrors(context as unknown as ErrorContextLike, async () => {
         const q = input as { scope: "user" | "project"; projectPath?: string }
@@ -152,9 +167,27 @@ export default Plugin.define({
         return await previewMigrationFile({ filePath: q.path })
       }),
 
-      watchProject: async () => notImplemented(),     // P3-T2
+      // goal.md §12.1：项目级 agents/ 目录按需订阅；传空 = 停止监听
+      watchProject: async (input) => {
+        const q = input as { projectPath?: string }
+        projectWatcher?.close()
+        projectWatcher = null
+        if (q.projectPath) {
+          projectWatcher = watchAgentsDir(projectAgentsDir(q.projectPath), () => changeDebouncer.trigger())
+        }
+        return {}
+      },
     })
 
-    void reg
+    // 用户级目录常驻监听（goal.md §12.1）；目录不存在时 watchAgentsDir 会先创建
+    const userWatcher = watchAgentsDir(userAgentsDir(), () => changeDebouncer.trigger())
+
+    return () => {
+      userWatcher?.close()
+      projectWatcher?.close()
+      projectWatcher = null
+      changeDebouncer.dispose()
+      void reg.dispose()
+    }
   },
 })
