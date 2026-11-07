@@ -4,7 +4,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import fs from "node:fs"
 import path from "node:path"
-import { catalog } from "../src/gui/i18n.ts"
+import { catalog } from "../src/gui/i18n/index.ts"
 
 const guiDir = path.join(import.meta.dirname, "..", "src", "gui")
 
@@ -12,7 +12,7 @@ const guiDir = path.join(import.meta.dirname, "..", "src", "gui")
 const messagesOf = (locale: string): Readonly<Record<string, string>> =>
   (catalog as Readonly<Record<string, Readonly<Record<string, string>>>>)[locale]
 
-/** src/gui 下全部源码（含组件与纯逻辑模块），不含 i18n.ts 自身。 */
+/** src/gui 顶层全部源码（含组件与纯逻辑模块）；i18n/ 词典子目录无 .ts 顶层项，天然被扩展名正则排除。 */
 function guiSources(): string[] {
   return fs
     .readdirSync(guiDir)

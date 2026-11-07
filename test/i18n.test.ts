@@ -4,7 +4,7 @@
 // 找不到就用 en 兜底；我们只注册了 zh-CN，故落空。
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { catalog } from "../src/gui/i18n.ts"
+import { catalog } from "../src/gui/i18n/index.ts"
 
 // 动态按键索引：catalog 是 as const 字面量，测试里需要按字符串键访问
 const messagesOf = (locale: string): Readonly<Record<string, string>> =>
