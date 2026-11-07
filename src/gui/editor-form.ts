@@ -33,14 +33,12 @@ function parseSteps(stepsText: string | undefined): number | undefined {
 
 /** 表单草稿 → RPC patch。model 与 variant 合并；hidden=false 视为不写。 */
 export function buildPatch(draft: EditorDraft): AgentPatch {
-  // draft.model 可能已带后缀（modelRefFromRead 的产物），此时不再重复追加 variant
-  const model = draft.model
-    ? draft.model.includes("#")
-      ? draft.model
-      : draft.variant
-        ? `${draft.model}#${draft.variant}`
-        : draft.model
-    : undefined
+  // draft.model 约定为不带后缀的 base ref（见 modelRefFromRead）。
+  // 若调用方误传了已带后缀的值，先剥掉再拼，避免写出 a/b#high#high。
+  const base = draft.model?.includes("#")
+    ? draft.model.slice(0, draft.model.indexOf("#"))
+    : draft.model
+  const model = base ? (draft.variant ? `${base}#${draft.variant}` : base) : undefined
   const patch: AgentPatch = {
     description: draft.description,
     body: draft.body,
@@ -198,10 +196,12 @@ export function isConflictError(error: unknown): boolean {
  * 从 read 结果的 meta 还原模型引用（缺陷 B）。
  *
  * V1 文件把模型写成两个字段：`model: a/b` + `variant: high`；V2 只有一个 `model: a/b#high`。
- * 若 GUI 只读 meta.model，V1 的 variant 会在编辑期间丢失，保存时 patch.model（无后缀）
- * 又会覆盖 migrateContent 产生的 `#high`，落盘就少了思考深度。
  *
- * 规则：model 里已有 `#` 时以它为准；否则把 V1 的 variant 并进去。
+ * 约定：返回的 `model` 始终是**不带后缀**的 base ref，`variant` 独立返回。
+ * 编辑器里所有消费方（显示行、深度下拉、模型弹窗打勾、buildPatch）都按这一约定工作：
+ * 需要完整引用时自己拼一次 `#variant`，因此不会出现二次拼接。
+ *
+ * 若 model 本身已带后缀（V2 文件、或用户手写过），以后缀为准并把它从 base 里剥掉。
  */
 export function modelRefFromRead(
   meta: Record<string, unknown>,
@@ -209,10 +209,9 @@ export function modelRefFromRead(
 ): { model?: string; variant?: string } {
   const raw = typeof meta.model === "string" && meta.model.length > 0 ? meta.model : undefined
   if (raw === undefined) return { model: undefined, variant: undefined }
-  // 已带后缀：保持完整引用（splitModelRef 会剥离后缀，这里不能直接用它的 model 字段）
-  if (raw.includes("#")) return { model: raw, variant: raw.slice(raw.indexOf("#") + 1) || undefined }
+  if (raw.includes("#")) return splitModelRef(raw)
   const variant = format === "v1" && typeof meta.variant === "string" && meta.variant.length > 0
     ? meta.variant
     : undefined
-  return variant === undefined ? { model: raw, variant: undefined } : { model: `${raw}#${variant}`, variant }
+  return { model: raw, variant }
 }

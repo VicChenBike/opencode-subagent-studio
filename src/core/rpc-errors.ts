@@ -19,6 +19,9 @@ export const ERROR_CODES = [
 
 const DECLARED = new Set<string>(ERROR_CODES)
 
+/** 契约里每个错误码的 data schema 都是空对象，这里复用同一个不可变实例。 */
+const EMPTY_DATA: Record<string, never> = Object.freeze({}) as Record<string, never>
+
 /** 核心层（agent-store）用 `err.code` 标注失败原因；这里把它取出来并校验是否已声明。 */
 export function codeOf(error: unknown): ErrorCode | undefined {
   if (error === null || typeof error !== "object") return undefined
@@ -37,9 +40,17 @@ export function errorPayload(error: unknown): { code: ErrorCode; message: string
   return { code, message }
 }
 
-/** 宿主 handler 上下文里我们用到的那部分。 */
+/**
+ * 宿主 handler 上下文里我们用到的那部分。
+ *
+ * 真实签名（@opencode/plugin/dist/promise/adapter.js 的 rpcFromEffect 里）：
+ *   error: (type, message, data) => new ReturnedRpcError(type, message, data)
+ * 三个参数缺一不可：data 会按该方法 `errors[name]` 的 schema 校验。
+ * 我们的契约把错误 data 声明成 `{ type: "object", properties: {}, additionalProperties: false }`，
+ * 漏传 data（= undefined）会让宿主抛 `SchemaError(Expected object)` 并以 HTTP 500 返回。
+ */
 export interface ErrorContextLike {
-  error: (name: string, message: string) => unknown
+  error: (name: string, message: string, data: Record<string, never>) => unknown
 }
 
 /**
@@ -62,6 +73,8 @@ export async function runWithDeclaredErrors<Output>(
   } catch (error) {
     const payload = errorPayload(error)
     if (payload === undefined) throw error
-    return context.error(payload.code, payload.message) as Output
+    // 第三个参数必须是空对象：契约里所有错误 data 都是 `{ type: "object", properties: {} }`，
+    // 传 undefined 会被宿主 schema 拒绝（SchemaError(Expected object) → 500）。
+    return context.error(payload.code, payload.message, EMPTY_DATA) as Output
   }
 }

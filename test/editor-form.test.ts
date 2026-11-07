@@ -190,16 +190,19 @@ test("isConflictError rejects unrelated failures", () => {
 // 缺陷 B 回归：V1 文件里 model 与 variant 是两个独立字段。
 // 桌面端实测：GUI 只读 meta.model（不含 variant），编辑页深度下拉显示「无」，
 // 保存时 patch.model（无 #high）覆盖了 migrateContent 产生的 model: a/b#high。
-// 修复：read 侧把 V1 的 variant 并进 modelRef，使 patch 天然保留 variant。
-test("modelRefFromRead folds a v1 variant into provider/model#variant", () => {
+//
+// 契约：modelRefFromRead 返回的 model 始终是**不带后缀**的 base ref，variant 独立返回。
+// 这样编辑器里所有消费方（显示行、深度下拉、模型弹窗打勾、buildPatch）都按同一约定工作，
+// 显示行自己拼 #variant，不会出现二次拼接。
+test("modelRefFromRead folds a v1 variant into the separate variant field", () => {
   const ref = modelRefFromRead({ model: "acme/standard", variant: "high" }, "v1")
-  assert.equal(ref.model, "acme/standard#high")
+  assert.equal(ref.model, "acme/standard", "model must stay the base ref")
   assert.equal(ref.variant, "high")
 })
 
-test("modelRefFromRead leaves an already-suffixed v2 model alone", () => {
+test("modelRefFromRead splits an already-suffixed model into base plus variant", () => {
   const ref = modelRefFromRead({ model: "acme/standard#high" }, "v2")
-  assert.equal(ref.model, "acme/standard#high")
+  assert.equal(ref.model, "acme/standard", "model must stay the base ref")
   assert.equal(ref.variant, "high")
 })
 
@@ -208,13 +211,13 @@ test("modelRefFromRead returns an empty ref when the file has no model", () => {
   assert.deepEqual(modelRefFromRead({}, "v2"), { model: undefined, variant: undefined })
 })
 
-test("modelRefFromRead does not double-suffix when v1 already has a hash", () => {
+test("modelRefFromRead prefers an explicit suffix over the variant field", () => {
   const ref = modelRefFromRead({ model: "acme/standard#low", variant: "high" }, "v1")
-  assert.equal(ref.model, "acme/standard#low", "an explicit suffix wins over the variant field")
+  assert.equal(ref.model, "acme/standard", "the suffix wins, and it is stripped from the base")
   assert.equal(ref.variant, "low")
 })
 
-// 全链路：read V1 → buildPatch → 落盘后 #high 仍在
+// 全链路：read V1 → buildPatch → 落盘后 #high 仍在（且只有一个）
 test("buildPatch keeps the variant that modelRefFromRead recovered", () => {
   const ref = modelRefFromRead({ model: "acme/standard", variant: "high" }, "v1")
   const patch = buildPatch({
@@ -223,4 +226,14 @@ test("buildPatch keeps the variant that modelRefFromRead recovered", () => {
     matrix: MATRIX,
   })
   assert.equal(patch.model, "acme/standard#high")
+})
+
+// 显示行与 patch 必须一致：两者都由 base + variant 拼出，永远只有一个 #variant
+test("the displayed model ref and the saved patch agree, with a single suffix", () => {
+  const ref = modelRefFromRead({ model: "acme/standard", variant: "high" }, "v1")
+  const display = `${ref.model}${ref.variant ? `#${ref.variant}` : ""}`
+  const patch = buildPatch({ description: "d", body: "b", model: ref.model, variant: ref.variant, matrix: MATRIX })
+  assert.equal(display, "acme/standard#high")
+  assert.equal(patch.model, display)
+  assert.equal((display.match(/#/g) ?? []).length, 1, "exactly one # in the display string")
 })

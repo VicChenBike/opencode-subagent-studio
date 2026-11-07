@@ -76,3 +76,53 @@ test("every declared code maps to context.error with the same name", async () =>
     assert.equal(result.message, `failed: ${code}`)
   }
 })
+
+// 真实签名（从 @opencode/plugin/dist/promise/adapter.js 提取）：
+//   error: (type, message, data) => new ReturnedRpcError(type, message, data)
+// data 是第三个参数，且宿主按该方法的 errors[name] schema 校验它。
+// 我们的契约把错误 data 声明为 { type: "object", properties: {}, additionalProperties: false }，
+// 传 undefined 会抛 SchemaError(Expected object) → HTTP 500。所以必须显式传 {}。
+test("declared errors pass an empty data object, not undefined", async () => {
+  const { runWithDeclaredErrors } = await import("../src/core/rpc-errors.ts")
+  const seen: unknown[][] = []
+  const context = {
+    error: (...args: unknown[]) => {
+      seen.push(args)
+      return { __error: args[0] }
+    },
+  }
+  await runWithDeclaredErrors(context, async () => {
+    throw Object.assign(new Error("file changed on disk"), { code: "conflict" })
+  })
+  assert.equal(seen.length, 1)
+  assert.deepEqual(seen[0], ["conflict", "file changed on disk", {}])
+})
+
+test("the third argument is a plain empty object every declared code can encode", async () => {
+  const { runWithDeclaredErrors, ERROR_CODES } = await import("../src/core/rpc-errors.ts")
+  const { Subagents } = await import("../src/rpc.ts")
+  const E = await import("effect")
+  const conv = (schema: unknown) =>
+    E.SchemaRepresentation.fromJsonSchemaDocument({ dialect: "draft-2020-12", schema, definitions: {} } as never)
+
+  // 契约里 methods 的联合类型不含 errors 键的方法，这里按运行时形状取
+  const methods = Object.entries(Subagents.methods) as [string, { errors?: Record<string, unknown> }][]
+  const methodsWithErrors = methods.filter(([, def]) => def.errors !== undefined)
+  assert.ok(methodsWithErrors.length > 0)
+
+  for (const [, def] of methodsWithErrors) {
+    for (const [name, schema] of Object.entries(def.errors!)) {
+      const seen: unknown[] = []
+      const context = { error: (...args: unknown[]) => { seen.push(args[2]); return { __error: args[0] } } }
+      await runWithDeclaredErrors(context, async () => {
+        throw Object.assign(new Error(`${name} failed`), { code: name })
+      })
+      assert.equal(seen.length, 1, `${name} must reach context.error`)
+      assert.doesNotThrow(
+        () => E.Schema.encodeUnknownSync(conv(schema) as never)(seen[0]),
+        `${name} data must encode against its contract schema`,
+      )
+    }
+  }
+  assert.ok(ERROR_CODES.length === 7)
+})

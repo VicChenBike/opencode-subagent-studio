@@ -303,10 +303,15 @@ body
   assert.equal(res.format, "v1")
   assert.equal((res.meta as Record<string, unknown>).variant, "high")
 
-  // 2. GUI 还原模型引用（修复点）
+  // 2. GUI 还原模型引用（修复点）：base ref + 独立 variant
   const ref = modelRefFromRead(res.meta as Record<string, unknown>, res.format)
-  assert.equal(ref.model, "acme/standard#high", "read must expose the combined ref")
+  assert.equal(ref.model, "acme/standard", "model must be the base ref")
   assert.equal(ref.variant, "high", "depth dropdown must show high")
+
+  // 2b. 编辑页显示行由 base + variant 拼出，必须只有一个 #
+  const display = `${ref.model}${ref.variant ? `#${ref.variant}` : ""}`
+  assert.equal(display, "acme/standard#high")
+  assert.equal((display.match(/#/g) ?? []).length, 1, "display must not double the suffix")
 
   // 3. 迁移预览也确认 #high（服务端本来就对）
   const preview = await previewMigrationFile({ filePath: file })
@@ -333,5 +338,6 @@ body
   assert.equal((after.meta as Record<string, unknown>).model, "acme/standard#high", "variant must survive the save")
   const raw = await (await import("node:fs/promises")).readFile(file, "utf8")
   assert.ok(raw.includes("model: acme/standard#high"))
+  assert.ok(!raw.includes("#high#high"), "the saved file must not double the suffix")
   assert.ok(!raw.includes("variant:"), "v2 has no separate variant field")
 }))
