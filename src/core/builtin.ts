@@ -1,0 +1,75 @@
+// src/core/builtin.ts —— 内置代理模型覆盖（纯逻辑，goal.md §11）。
+//
+// general / explore 的提示词与权限不可改，只能换模型。
+// 覆盖值存插件自己的 storage（键 `builtin-model.<id>`），通过 ctx.agent.transform 注入；
+// 「继承默认」= 删除该键，下次 transform 就不再改写模型。
+import type { ModelRefParts } from "./model-ref.ts"
+import { parseModelRef } from "./model-ref.ts"
+
+/** 允许覆盖的内置代理。 */
+export const BUILTIN_IDS = ["general", "explore"] as const
+export type BuiltinId = (typeof BUILTIN_IDS)[number]
+
+/** 覆盖用的 storage 键前缀。 */
+const KEY_PREFIX = "builtin-model."
+
+/** ctx.agent.transform 的 editor 里我们用到的那部分（宿主签名见 @opencode/plugin/promise/agent）。 */
+export interface AgentInfoLike {
+  id: string
+  name: string
+  mode: "subagent" | "primary" | "all"
+  hidden: boolean
+  permissions: readonly unknown[]
+  request: Record<string, unknown>
+  model?: { id: string; providerID: string; variant?: string }
+  [key: string]: unknown
+}
+
+export interface AgentEditorLike {
+  list(): readonly AgentInfoLike[]
+  get(id: string): AgentInfoLike | undefined
+  default(id: string | undefined): void
+  update(id: string, update: (agent: AgentInfoLike) => void): void
+  remove(id: string): void
+}
+
+export function overrideKeyOf(id: BuiltinId): string {
+  return `${KEY_PREFIX}${id}`
+}
+
+export function builtinIdOf(key: string): BuiltinId | undefined {
+  if (!key.startsWith(KEY_PREFIX)) return undefined
+  const id = key.slice(KEY_PREFIX.length)
+  return (BUILTIN_IDS as readonly string[]).includes(id) ? (id as BuiltinId) : undefined
+}
+
+/** "provider/model#variant" → ModelRef；非法返回 undefined（与 parseModelRef 同一套规则）。 */
+export function parseOverride(value: string | undefined): ModelRefParts | undefined {
+  return parseModelRef(value) ?? undefined
+}
+
+/**
+ * 把覆盖值应用到编辑器。
+ * 只处理 `builtin-model.<id>` 形式且值合法的键；其余忽略。
+ * 没有覆盖的内置代理完全不碰（保持宿主给的原生模型）。
+ */
+export function applyBuiltinOverrides(
+  editor: AgentEditorLike,
+  overrides: Readonly<Record<string, string | undefined>>,
+): void {
+  for (const [key, value] of Object.entries(overrides)) {
+    const id = builtinIdOf(key)
+    if (id === undefined) continue
+    const ref = parseOverride(value)
+    if (ref === undefined) continue
+    if (editor.get(id) === undefined) continue
+    editor.update(id, (agent) => {
+      const model: { id: string; providerID: string; variant?: string } = {
+        id: ref.modelID,
+        providerID: ref.providerID,
+      }
+      if (ref.variant !== undefined) model.variant = ref.variant
+      agent.model = model
+    })
+  }
+}

@@ -6,7 +6,7 @@ import { Subagents, ACTIONS } from "./rpc.ts"
 import type {
   AgentSummary, ListOutput, ReadOutput, CreateOutput, UpdateOutput, RemoveOutput,
   RenameOutput, SetDisabledOutput, ModelsOutput, MigratePreviewOutput, ProviderSummary,
-  PermissionMatrix, AgentPatch,
+  PermissionMatrix, AgentPatch, BuiltinOverridesOutput, SetBuiltinModelInput, BuiltinSummary,
 } from "./rpc.ts"
 import {
   userAgentsDir, projectAgentsDir, listAgents, readAgentFile, assertAllowedPath,
@@ -16,6 +16,8 @@ import {
 import { migratePreview } from "./core/frontmatter.ts"
 import { runWithDeclaredErrors } from "./core/rpc-errors.ts"
 import { createChangeDebouncer, watchAgentsDir } from "./core/watch.ts"
+import { applyBuiltinOverrides, BUILTIN_IDS, overrideKeyOf } from "./core/builtin.ts"
+import type { AgentEditorLike } from "./core/builtin.ts"
 import type { AgentsWatcher } from "./core/watch.ts"
 import type { ErrorContextLike } from "./core/rpc-errors.ts"
 
@@ -43,6 +45,38 @@ function rootsForScopeOf(filePath: string): string[] {
 export default Plugin.define({
   id: "subagent-manager",
   async setup(ctx) {
+    // ---------- 内置代理模型覆盖（goal.md §11） ----------
+    // 覆盖值存插件自己的 storage，键 `builtin-model.<id>`；删除键 = 继承默认。
+    // 只改模型，提示词与权限不动（applyBuiltinOverrides 只写 agent.model）。
+    const readBuiltinOverrides = async (): Promise<BuiltinOverridesOutput> => {
+      const out: BuiltinOverridesOutput = {}
+      for (const id of BUILTIN_IDS) {
+        const value = await ctx.storage.get(overrideKeyOf(id))
+        if (typeof value === "string" && value.length > 0) out[id] = value
+      }
+      return out
+    }
+
+    const writeBuiltinOverride = async (id: (typeof BUILTIN_IDS)[number], model?: string): Promise<void> => {
+      if (model === undefined || model === "") {
+        // 「继承默认」= 删除键
+        await ctx.storage.remove(overrideKeyOf(id))
+        return
+      }
+      await ctx.storage.set(overrideKeyOf(id), model)
+    }
+
+    // transform 在每次 agent 重载后重放：读当前覆盖并注入
+    const transformReg = await ctx.agent.transform(async (editor) => {
+      // applyBuiltinOverrides 只认 `builtin-model.<id>` 形式的键，这里先转成该形状
+      const current = await readBuiltinOverrides()
+      const overrides: Record<string, string | undefined> = {}
+      for (const id of BUILTIN_IDS) {
+        if (current[id] !== undefined) overrides[overrideKeyOf(id)] = current[id]
+      }
+      applyBuiltinOverrides(editor as unknown as AgentEditorLike, overrides)
+    })
+
     // ---------- 文件监听（goal.md §12.1）：去抖 300ms → reload → changed ----------
     let projectWatcher: AgentsWatcher | null = null
 
@@ -62,11 +96,12 @@ export default Plugin.define({
         const dir = q.scope === "project" && q.projectPath ? projectAgentsDir(q.projectPath) : userAgentsDir()
         // AgentSummaryRow 与 rpc.AgentSummary 结构逐字段一致
         const agents: AgentSummary[] = await listAgents(dir)
-        // 内置代理固定两项；模型覆盖 P3-T5 接入（此处先无覆盖）
-        const builtins = [
-          { id: "general" as const },
-          { id: "explore" as const },
-        ]
+        // 内置代理固定两项，带上当前覆盖值（无覆盖则不写 model，GUI 显示「继承默认」）
+        const overrides = await readBuiltinOverrides()
+        const builtins: BuiltinSummary[] = BUILTIN_IDS.map((id) => {
+          const model = overrides[id]
+          return model === undefined ? { id } : { id, model }
+        })
         return { agents, builtins }
       }),
 
@@ -157,8 +192,20 @@ export default Plugin.define({
         return { providers: [...byProvider.values()].sort((a, b) => a.id.localeCompare(b.id)) }
       }),
 
-      builtinOverrides: async () => notImplemented(), // P3-T5
-      setBuiltinModel: async () => notImplemented(),  // P3-T5
+      // 读取当前覆盖（goal.md §11）：storage 里没有键 = 继承默认
+      builtinOverrides: async (): Promise<BuiltinOverridesOutput> => readBuiltinOverrides(),
+
+      setBuiltinModel: async (input, context): Promise<unknown> =>
+        runWithDeclaredErrors(context as unknown as ErrorContextLike, async () => {
+          const q = input as SetBuiltinModelInput
+          if (!(BUILTIN_IDS as readonly string[]).includes(q.id)) {
+            return (context as unknown as ErrorContextLike).error("invalid_id", `not a builtin: ${q.id}`, {})
+          }
+          await writeBuiltinOverride(q.id, q.model)
+          await ctx.agent.reload()
+          await reg.events.emit("changed", {})
+          return {}
+        }),
 
       migratePreview: async (input, context): Promise<MigratePreviewOutput | unknown> => runWithDeclaredErrors(context as unknown as ErrorContextLike, async () => {
         const q = input as { path: string }
@@ -189,6 +236,7 @@ export default Plugin.define({
       projectWatcher?.close()
       projectWatcher = null
       changeDebouncer.dispose()
+      void transformReg.dispose()
       void reg.dispose()
     }
   },

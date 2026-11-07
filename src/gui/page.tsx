@@ -8,6 +8,7 @@ import { EditorPage, type EditorTarget } from "./editor"
 import { trashAgent } from "./trash-flow"
 import { toggleDisabled } from "./disable-flow"
 import { MigrationDialog } from "./migration-dialog"
+import { openModelPicker } from "./model-picker"
 import type { MigrateChange, ReadOutput } from "../rpc"
 
 type Scope =
@@ -189,7 +190,7 @@ export function Page(_props: { target?: string }) {
       <Show when={view().kind !== "error" && view().kind !== "loading"}>
         <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
           <div style={{ "font-weight": 600, opacity: 0.8 }}>{ctx.t("list.builtin")}</div>
-          <For each={data()?.builtins ?? []}>{(b) => <BuiltinRow builtin={b} />}</For>
+          <For each={data()?.builtins ?? []}>{(b) => <BuiltinRow builtin={b} onChanged={() => void refetch()} />}</For>
         </div>
       </Show>
     </div>
@@ -297,18 +298,45 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
   )
 }
 
-function BuiltinRow(props: { builtin: BuiltinSummary }) {
+function BuiltinRow(props: { builtin: BuiltinSummary; onChanged?: () => void }) {
   const ctx = usePlugin()
   const toolLabel = () =>
     props.builtin.id === "general" ? ctx.t("list.builtin.general.tools") : ctx.t("list.builtin.explore.tools")
+  // goal.md §5.4 / §11：内置代理只有模型控件，没有编辑、开关、垃圾桶
+  const pickModel = () => {
+    const current = props.builtin.model
+    const hashIndex = current?.indexOf("#") ?? -1
+    openModelPicker(ctx, {
+      current: hashIndex >= 0 ? current!.slice(0, hashIndex) : current,
+      variant: hashIndex >= 0 ? current!.slice(hashIndex + 1) : undefined,
+      onPick: (model, variant) => {
+        void (async () => {
+          try {
+            await ctx.client.rpc(Subagents).setBuiltinModel({
+              id: props.builtin.id,
+              model: model === undefined ? undefined : variant ? `${model}#${variant}` : model,
+            })
+            ctx.toast.show({ title: ctx.t("toast.saved"), variant: "success" })
+            props.onChanged?.()
+          } catch (err) {
+            ctx.toast.show({
+              title: ctx.t("common.error"),
+              description: String((err as { message?: string })?.message ?? err),
+              variant: "error",
+            })
+          }
+        })()
+      },
+    })
+  }
   return (
     <div style={{ display: "flex", gap: "8px", "align-items": "center", padding: "8px", "border-radius": "8px" }}>
       <div style={{ display: "flex", "flex-direction": "column", gap: "2px", flex: 1 }}>
         <div style={{ display: "flex", gap: "6px", "align-items": "center" }}>
           <span style={{ "font-weight": 500 }}>{props.builtin.id}</span>
-          <span style={{ "font-size": "12px", padding: "1px 6px", border: "1px solid", "border-radius": "6px", opacity: 0.8 }}>
+          <ctx.ui.Button variant="ghost" size="small" onClick={pickModel}>
             {props.builtin.model ?? ctx.t("list.inherit")}
-          </span>
+          </ctx.ui.Button>
           <span style={{ "font-size": "12px", padding: "1px 6px", border: "1px solid", "border-radius": "6px", opacity: 0.7 }}>
             {toolLabel()}
           </span>
