@@ -23,11 +23,6 @@ import type { OverrideCache } from "./core/builtin.ts"
 import type { AgentsWatcher } from "./core/watch.ts"
 import type { ErrorContextLike } from "./core/rpc-errors.ts"
 
-// 未实现方法的桩：P3 逐个替换
-function notImplemented(): never {
-  throw new Error("not_implemented")
-}
-
 function defaultMatrixActions(): PermissionMatrix["actions"] {
   return Object.fromEntries(ACTIONS.map((a) => [a, "allow" as const])) as PermissionMatrix["actions"]
 }

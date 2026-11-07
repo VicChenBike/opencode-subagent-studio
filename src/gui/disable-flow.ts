@@ -1,4 +1,5 @@
-// src/gui/disable-flow.ts —— 列表行停用开关的 GUI 流程（依赖注入，可单测，无 DOM）。
+// src/gui/disable-flow.ts —— 列表行「停用/启用开关」的 GUI 流程，含 switchEventToDisabled
+// 逆映射（开关 checked=启用 → 数据层 disabled 取反；依赖注入，可单测，无 DOM）。
 //
 // goal.md §10：开关写 `disabled: true/false`，false 时删除字段。
 // goal.md §5.3：对 V1 文件写 disabled 会触发整份切 V2 → 必须先弹迁移预览，
@@ -35,6 +36,15 @@ export interface DisableDeps {
 }
 
 export type ToggleResult = "toggled" | "cancelled" | "failed"
+
+/**
+ * 「启用开关」的 UI 事件 → 数据层 disabled 的映射。
+ * 开关是启用语义（checked = 启用，遵循宿主「蓝色 = 开」的惯例），
+ * 数据层 disabled 与之相反；徽标 / 变灰仍跟 disabled 走。
+ */
+export function switchEventToDisabled(checked: boolean): boolean {
+  return !checked
+}
 
 
 /**

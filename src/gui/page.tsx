@@ -7,7 +7,7 @@ import { listViewState, errorMessage, changedAction, agentRowState } from "./lis
 import { errorDescription } from "./error-copy"
 import { EditorPage, type EditorTarget } from "./editor"
 import { trashAgent } from "./trash-flow"
-import { toggleDisabled } from "./disable-flow"
+import { toggleDisabled, switchEventToDisabled } from "./disable-flow"
 import { MigrationDialog } from "./migration-dialog"
 import { openModelPicker } from "./model-picker"
 import type { MigrateChange, ReadOutput } from "../rpc"
@@ -249,11 +249,13 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
         </span>
       </div>
       {/* goal.md §10：开关写 disabled true/false；V1 先走迁移预览。
+          开关是「启用」语义（checked = 启用，蓝色 = 开），写盘前用
+          switchEventToDisabled 逆映射回数据层的 disabled。
           P3-a：Ui.Switch 的 onChange 只给 boolean、拿不到事件，所以用容器拦住冒泡，
-          否则点开关会同时触发行的 onClick 跳进编辑页。 */}
+          否则点开关会同时触发行 onClick 跳进编辑页。 */}
       <span onClick={(event) => event.stopPropagation()}>
       <ctx.ui.Switch
-        label={ctx.t("list.disabled")}
+        label={ctx.t("list.enabled")}
         hideLabel
         checked={rowState().switchChecked}
         onChange={(checked) => {
@@ -280,9 +282,9 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
                 toast: (input) => ctx.toast.show(input),
                 t: ctx.t,
               },
-              props.agent,
-              checked,
-            )
+                props.agent,
+                switchEventToDisabled(checked),
+              )
             if (result === "toggled") props.onChanged?.()
           })().catch((err) => {
             ctx.toast.show({

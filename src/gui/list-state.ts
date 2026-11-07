@@ -52,7 +52,7 @@ export function changedAction(input: {
 export interface AgentRowState {
   /** 行内「已停用」徽标是否显示 */
   showDisabledBadge: boolean
-  /** 停用开关是否处于打开态 */
+  /** 启用开关是否处于打开态（checked = 启用；与数据层 disabled 相反） */
   switchChecked: boolean
   /** 行是否降低不透明度 */
   dimmed: boolean
@@ -65,10 +65,14 @@ export interface AgentRowState {
  * `disabled: true`（= 停用）。桌面端曾出现全部 7 行都显示「已停用」而文件真值全是启用，
  * 所以这里用严格的 `=== true` 而不是 truthy 判断，并把三个派生值收在一处，
  * 避免徽标 / 开关 / 变灰三处各自判定而走偏。
+ *
+ * 开关语义（2026-11-07 用户决定）：开关是「启用」开关，遵循宿主惯例
+ * 蓝色（checked）= 启用；停用时开关回落白色 + 整行变暗 + 「已停用」徽标。
+ * 因此 switchChecked = !disabled，onChange 侧用 switchEventToDisabled 做逆映射。
  */
 export function agentRowState(agent: { disabled?: boolean }): AgentRowState {
   const disabled = normalizeFlag(agent.disabled)
-  return { showDisabledBadge: disabled, switchChecked: disabled, dimmed: disabled }
+  return { showDisabledBadge: disabled, switchChecked: !disabled, dimmed: disabled }
 }
 
 /**

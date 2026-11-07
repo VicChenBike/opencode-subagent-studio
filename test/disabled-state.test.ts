@@ -67,11 +67,11 @@ test("the disabled flag survives the host's encode/decode round trip", async () 
   }
 })
 
-test("agentRowState shows the badge and checks the switch only when disabled is true", () => {
+test("agentRowState: the row switch is an ENABLE switch (checked = enabled, blue = on)", () => {
   for (const c of CASES) {
     const state = agentRowState({ disabled: c.expected })
     assert.equal(state.showDisabledBadge, c.expected, `${c.label} → badge`)
-    assert.equal(state.switchChecked, c.expected, `${c.label} → switch`)
+    assert.equal(state.switchChecked, !c.expected, `${c.label} → switch (checked = enabled)`)
     assert.equal(state.dimmed, c.expected, `${c.label} → dimmed`)
   }
 })
@@ -79,7 +79,7 @@ test("agentRowState shows the badge and checks the switch only when disabled is 
 test("agentRowState treats a missing flag as enabled", () => {
   const state = agentRowState({})
   assert.equal(state.showDisabledBadge, false, "an absent flag must not read as disabled")
-  assert.equal(state.switchChecked, false)
+  assert.equal(state.switchChecked, true, "enabled = the enable switch is ON")
   assert.equal(state.dimmed, false)
 })
 
@@ -88,8 +88,11 @@ test("agentRowState treats a missing flag as enabled", () => {
 // 这里把归一化显式化，让两种字符串都能映射到正确语义。
 test("agentRowState normalizes string booleans from the transport", () => {
   assert.equal(agentRowState({ disabled: "true" as unknown as boolean }).showDisabledBadge, true)
+  assert.equal(agentRowState({ disabled: "true" as unknown as boolean }).switchChecked, false)
   assert.equal(agentRowState({ disabled: "false" as unknown as boolean }).showDisabledBadge, false)
+  assert.equal(agentRowState({ disabled: "false" as unknown as boolean }).switchChecked, true)
   assert.equal(agentRowState({ disabled: 1 as unknown as boolean }).showDisabledBadge, false)
+  assert.equal(agentRowState({ disabled: 1 as unknown as boolean }).switchChecked, true)
   assert.equal(agentRowState({ disabled: 0 as unknown as boolean }).showDisabledBadge, false)
 })
 
@@ -97,7 +100,7 @@ test("agentRowState never lights up for falsy or absent values", () => {
   for (const v of [undefined, null, false, 0, "", "false", "0"]) {
     const state = agentRowState({ disabled: v as unknown as boolean })
     assert.equal(state.showDisabledBadge, false, `value ${JSON.stringify(v)} must read as enabled`)
-    assert.equal(state.switchChecked, false)
+    assert.equal(state.switchChecked, true, `value ${JSON.stringify(v)} reads as enabled = switch ON`)
     assert.equal(state.dimmed, false)
   }
 })

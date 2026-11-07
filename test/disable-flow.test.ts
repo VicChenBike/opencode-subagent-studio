@@ -1,10 +1,10 @@
-// test/disable-flow.test.ts —— 列表行停用开关的 GUI 流程（依赖注入，无 DOM）。
+// test/disable-flow.test.ts —— 列表行「停用/启用开关」的 GUI 流程（依赖注入，无 DOM）。
 // goal.md §10：开关写 disabled true/false，false 时删除字段。
 // goal.md §5.3：对 V1 文件写 disabled 会触发整份切 V2 → 必须先弹迁移预览，
 // 确认后 update（服务端整份迁移）再 setDisabled。
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { toggleDisabled } from "../src/gui/disable-flow.ts"
+import { toggleDisabled, switchEventToDisabled } from "../src/gui/disable-flow.ts"
 
 function fakeDeps(opts: {
   format?: "v1" | "v2"
@@ -107,7 +107,7 @@ test("a failure reports an error toast and no success toast", async () => {
   assert.equal(toast.description, "error.notFound")
 })
 
-test("a v1 agent being enabled skips the migration because nothing is written", async () => {
+test("enabling a v1 agent still migrates first because the server refuses all v1 writes", async () => {
   // 启用 V1 文件不需要写 V2 字段（setDisabled(false) 只是删字段），
   // 但服务端对 V1 一律拒绝，所以仍要走迁移；这里确认行为一致。
   const { calls, deps } = fakeDeps({ format: "v1", previewConfirmed: true })
@@ -115,4 +115,10 @@ test("a v1 agent being enabled skips the migration because nothing is written", 
   assert.equal(calls.previewDialog, 1)
   assert.equal(calls.update.length, 1)
   assert.deepEqual(calls.setDisabled, [{ path: "C:/agents/legacy.md", disabled: false }])
+})
+
+test("switchEventToDisabled maps the enable switch to the data-layer flag", () => {
+  // 启用开关：用户看到 checked（蓝色）= 启用；数据层 disabled 与之相反。
+  assert.equal(switchEventToDisabled(true), false, "switch ON = enabled = disabled:false")
+  assert.equal(switchEventToDisabled(false), true, "switch OFF = disabled = disabled:true")
 })
