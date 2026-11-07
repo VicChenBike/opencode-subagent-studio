@@ -2,6 +2,10 @@
 // 桌面端实测（2026-11-07）：list RPC 返回 500 时页面整页空白。
 // 把「资源状态 + 查询词」映射成显式视图状态，错误必须落到 error 分支。
 import type { AgentSummary } from "../rpc"
+import { messageOf } from "./error-copy.ts"
+
+/** 从任意错误值取出可展示的文案（与 error-copy 共用一份实现）。 */
+export const errorMessage = messageOf
 
 export interface ListViewInput {
   loading: boolean
@@ -17,22 +21,6 @@ export type ListViewState =
   | { kind: "emptySearch"; query: string }
   | { kind: "rows"; agents: AgentSummary[] }
 
-/** 从任意错误值取出可展示的文案：Error、带 message 的对象、字符串、其他原值的 String()。 */
-export function errorMessage(error: unknown): string {
-  if (error === null || error === undefined) return ""
-  if (error instanceof Error) return error.message
-  if (typeof error === "string") return error
-  if (typeof error === "object") {
-    const message = (error as { message?: unknown }).message
-    if (typeof message === "string") return message
-    try {
-      return JSON.stringify(error)
-    } catch {
-      return String(error)
-    }
-  }
-  return String(error)
-}
 
 /** 错误优先于 loading：错误态必须能覆盖仍在 loading 的资源。 */
 export function listViewState(input: ListViewInput): ListViewState {

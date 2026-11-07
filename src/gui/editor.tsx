@@ -259,10 +259,12 @@ export function EditorPage(props: {
               {props.target.mode === "create" ? ctx.t("editor.create") : ctx.t("editor.title")}
             </div>
             <div style={{ opacity: 0.7, "font-size": "12px" }}>
-              {ctx.t("editor.scope")}：
-              {props.target.scope.kind === "user"
-                ? ctx.t("list.scope.user")
-                : ctx.t("list.scope.project", { project: props.target.scope.projectName })}
+              {ctx.t("editor.scopeValue", {
+                scope:
+                  props.target.scope.kind === "user"
+                    ? ctx.t("list.scope.user")
+                    : ctx.t("list.scope.project", { project: props.target.scope.projectName }),
+              })}
               {format() === "v1" ? " · V1" : ""}
             </div>
           </div>

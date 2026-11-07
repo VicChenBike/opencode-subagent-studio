@@ -189,3 +189,16 @@ test("every key's placeholders match between locales", () => {
   const bad = Object.keys(en).filter((k) => ph(en[k]) !== ph(zh[k]))
   assert.deepEqual(bad, [], `placeholder mismatch: ${bad.join(", ")}`)
 })
+
+// R6 遗留：全角冒号不能硬编码在 JSX 里，否则英文界面也会出现「：」。
+// 用带占位符的键让两种语言各自决定分隔符。
+test("the scope line uses a placeholder instead of a hardcoded colon", () => {
+  const source = fs.readFileSync(path.join(guiDir, "editor.tsx"), "utf8")
+  assert.ok(!/ctx\.t\("editor\.scope"\)\}：/.test(source), "the full-width colon must come from the catalog")
+  const key = "editor.scopeValue"
+  for (const locale of Object.keys(catalog)) {
+    assert.ok(key in catalog[locale as keyof typeof catalog], `${locale} missing ${key}`)
+  }
+  assert.equal(catalog.en[key], "Scope: {{scope}}")
+  assert.equal(catalog["zh-Hans"][key], "作用域：{{scope}}")
+})

@@ -30,7 +30,7 @@ export function errorCopyKey(error: unknown): string | undefined {
   return findCopyKey(error)
 }
 
-function messageOf(error: unknown): string {
+export function messageOf(error: unknown): string {
   if (error === null || error === undefined) return ""
   if (error instanceof Error) return error.message
   if (typeof error === "string") return error
