@@ -82,3 +82,67 @@ test("agentRowState treats a missing flag as enabled", () => {
   assert.equal(state.switchChecked, false)
   assert.equal(state.dimmed, false)
 })
+
+// 防御：宿主若把布尔以字符串形式传回（传输层/编码器差异），GUI 也必须判对。
+// 严格 === true 对 "true" 会判 false（安全方向：不误报停用），但对 "false" 也判 false（正确）。
+// 这里把归一化显式化，让两种字符串都能映射到正确语义。
+test("agentRowState normalizes string booleans from the transport", () => {
+  assert.equal(agentRowState({ disabled: "true" as unknown as boolean }).showDisabledBadge, true)
+  assert.equal(agentRowState({ disabled: "false" as unknown as boolean }).showDisabledBadge, false)
+  assert.equal(agentRowState({ disabled: 1 as unknown as boolean }).showDisabledBadge, false)
+  assert.equal(agentRowState({ disabled: 0 as unknown as boolean }).showDisabledBadge, false)
+})
+
+test("agentRowState never lights up for falsy or absent values", () => {
+  for (const v of [undefined, null, false, 0, "", "false", "0"]) {
+    const state = agentRowState({ disabled: v as unknown as boolean })
+    assert.equal(state.showDisabledBadge, false, `value ${JSON.stringify(v)} must read as enabled`)
+    assert.equal(state.switchChecked, false)
+    assert.equal(state.dimmed, false)
+  }
+})
+
+// 关键对照：hidden 与 disabled 在 schema 里同构，两者判定必须一致
+test("hidden and disabled are judged the same way", () => {
+  for (const v of [true, false, undefined]) {
+    const badge = agentRowState({ disabled: v as boolean }).showDisabledBadge
+    const hiddenShown = v === true
+    assert.equal(badge, hiddenShown, `disabled=${v} must match the hidden badge rule`)
+  }
+})
+
+// 用项目真实的 list.output schema 走完整宿主链路：encode → JSON → decode → GUI 判定。
+// 这条测试锁死「disabled:false 经宿主编解码后不得变成 truthy」。
+test("real host chain keeps disabled:false as enabled for every row shape", async () => {
+  const E = await import("effect")
+  const SR = (E as unknown as { SchemaRepresentation: { fromJsonSchemaDocument: (doc: unknown) => unknown } })
+    .SchemaRepresentation
+  const schema = SR.fromJsonSchemaDocument({
+    dialect: "draft-2020-12",
+    schema: Subagents.methods.list.output,
+    definitions: {},
+  })
+
+  const rows = [
+    { id: "plain", disabled: false, hidden: false, format: "v2" as const },
+    { id: "hidden-on", disabled: false, hidden: true, format: "v2" as const },
+    { id: "disabled-on", disabled: true, hidden: false, format: "v2" as const },
+    { id: "v1-file", disabled: false, hidden: true, format: "v1" as const },
+  ].map((r) => ({ ...r, path: `/p/${r.id}.md`, description: "d", hash: "0123456789abcdef", mtime: 1 }))
+
+  const payload = { agents: rows, builtins: [{ id: "general" as const }] }
+  const encoded = E.Schema.encodeUnknownSync(schema as never)(payload) as { agents: { id: string; disabled: unknown }[] }
+  const wire = JSON.parse(JSON.stringify(encoded))
+  const decoded = E.Schema.decodeUnknownSync(schema as never)(wire) as { agents: { id: string; disabled: unknown; hidden: unknown }[] }
+
+  for (let i = 0; i < rows.length; i++) {
+    assert.equal(typeof decoded.agents[i].disabled, "boolean", `${rows[i].id}: disabled must stay boolean`)
+    assert.equal(decoded.agents[i].disabled, rows[i].disabled, `${rows[i].id}: disabled must survive the chain`)
+    // 徽标必须只由 disabled 决定（hidden 是独立字段，不影响停用徽标）
+    assert.equal(
+      agentRowState(decoded.agents[i] as { disabled?: boolean }).showDisabledBadge,
+      rows[i].disabled === true,
+      `${rows[i].id}: the disabled badge must follow disabled alone`,
+    )
+  }
+})

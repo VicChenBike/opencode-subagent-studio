@@ -79,6 +79,20 @@ export interface AgentRowState {
  * 避免徽标 / 开关 / 变灰三处各自判定而走偏。
  */
 export function agentRowState(agent: { disabled?: boolean }): AgentRowState {
-  const disabled = agent.disabled === true
+  const disabled = normalizeFlag(agent.disabled)
   return { showDisabledBadge: disabled, switchChecked: disabled, dimmed: disabled }
+}
+
+/**
+ * 把传输层可能带来的各种「真」表示收敛成布尔。
+ *
+ * 契约里 disabled 是 boolean，但 RPC 要跨 JSON/HTTP 两跳，任何一环把布尔写成字符串
+ * 都会让 GUI 判错。这里只把**明确的真值**当作 true：布尔 true、字符串 "true"、数字 1。
+ * 其余（undefined / null / false / "false" / "0" / 0 / 空串）一律视为启用——
+ * 误报「已停用」比漏报更糟：用户会以为代理被停用了。
+ */
+function normalizeFlag(value: unknown): boolean {
+  // 只认「明确为真」的两种表示。数字 1 不认——契约里没有数字形态，
+  // 出现它说明数据已经不可信，宁可当启用也不误报停用。
+  return value === true || value === "true"
 }
