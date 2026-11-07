@@ -4,6 +4,7 @@ import { usePlugin } from "@opencode/plugin/gui"
 import { Subagents } from "../rpc"
 import type { AgentSummary, BuiltinSummary, ListOutput } from "../rpc"
 import { listViewState, errorMessage } from "./list-state"
+import { EditorPage, type EditorTarget } from "./editor"
 
 type Scope =
   | { kind: "user" }
@@ -24,6 +25,11 @@ export function Page(_props: { target?: string }) {
   const ctx = usePlugin()
   const [scope, setScope] = createSignal<Scope>({ kind: "user" })
   const [query, setQuery] = createSignal("")
+  const [editorTarget, setEditorTarget] = createSignal<EditorTarget | null>(null)
+  const openEditor = (agent: AgentSummary) =>
+    setEditorTarget({ mode: "edit", path: agent.path, id: agent.id, scope: scope() })
+  const openCreate = () =>
+    setEditorTarget({ mode: "create", scope: scope(), draftId: "" })
 
   // 本机项目列表：ctx.servers.list() → 第一个（本机 sidecar）→ data.project.list()（响应式同步）
   const projects = createMemo<ProjectLike[]>(() => {
@@ -85,6 +91,17 @@ export function Page(_props: { target?: string }) {
   ]
 
   return (
+    <Show
+      when={!editorTarget()}
+      fallback={
+        <EditorPage
+          target={editorTarget()!}
+          existingIds={() => (data()?.agents ?? []).map((a) => a.id)}
+          onBack={() => setEditorTarget(null)}
+          onSaved={() => { setEditorTarget(null); void refetch() }}
+        />
+      }
+    >
     <div style={{ display: "flex", "flex-direction": "column", gap: "12px", padding: "12px", height: "100%" }}>
       <div style={{ display: "flex", gap: "8px", "align-items": "center" }}>
         <ctx.ui.Menu label={scopeLabel()} items={scopeMenuItems()} trigger="button" placement="bottom-start" />
@@ -92,6 +109,9 @@ export function Page(_props: { target?: string }) {
         <div style={{ flex: 1 }} />
         <ctx.ui.TextInput label={ctx.t("list.search")} value={query()} onInput={setQuery} />
         <ctx.ui.IconButton icon="refresh" label={ctx.t("list.refresh")} onClick={() => void refetch()} />
+        <ctx.ui.Button variant="contrast" size="small" icon="plus" onClick={openCreate}>
+          {ctx.t("list.create")}
+        </ctx.ui.Button>
       </div>
 
       <Switch fallback={<ctx.ui.Loader />}>
@@ -127,7 +147,7 @@ export function Page(_props: { target?: string }) {
         </Match>
 
         <Match when={view().kind === "rows"}>
-          <For each={filtered()}>{(agent) => <AgentRow agent={agent} />}</For>
+          <For each={filtered()}>{(agent) => <AgentRow agent={agent} onOpen={() => openEditor(agent)} />}</For>
         </Match>
       </Switch>
 
@@ -138,13 +158,20 @@ export function Page(_props: { target?: string }) {
         </div>
       </Show>
     </div>
+    </Show>
   )
 }
 
-function AgentRow(props: { agent: AgentSummary }) {
+function AgentRow(props: { agent: AgentSummary; onOpen?: () => void }) {
   const ctx = usePlugin()
   return (
-    <div style={{ display: "flex", gap: "8px", "align-items": "center", padding: "8px", "border-radius": "8px" }}>
+    <div
+      onClick={() => props.onOpen?.()}
+      style={{
+        display: "flex", gap: "8px", "align-items": "center", padding: "8px", "border-radius": "8px",
+        cursor: props.onOpen ? "pointer" : "default",
+      }}
+    >
       <span style={{
         width: "10px", height: "10px", "border-radius": "50%",
         background: props.agent.color ?? "var(--oc-text-muted, #888)",
