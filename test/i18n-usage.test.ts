@@ -8,6 +8,10 @@ import { catalog } from "../src/gui/i18n.ts"
 
 const guiDir = path.join(import.meta.dirname, "..", "src", "gui")
 
+// 动态按键索引：catalog 是 as const 字面量，测试里需要按字符串键访问
+const messagesOf = (locale: string): Readonly<Record<string, string>> =>
+  (catalog as Readonly<Record<string, Readonly<Record<string, string>>>>)[locale]
+
 /** src/gui 下全部源码（含组件与纯逻辑模块），不含 i18n.ts 自身。 */
 function guiSources(): string[] {
   return fs
@@ -147,4 +151,41 @@ test("trash-flow's known copy keys all exist in every locale", () => {
       assert.ok(key in catalog[locale as keyof typeof catalog], `${locale} missing ${key}`)
     }
   }
+})
+
+// P3-T7 全量审计：目录里不应留下无引用的键（除少数动态构造的以外）。
+// 扫描口径：src/gui 下所有 ctx.t / 注入式 t / 显式常量键，加上动态前缀展开。
+test("the catalog has no dead keys", () => {
+  const used = new Set<string>()
+  const prefixes = new Set<string>()
+  for (const file of guiSources()) {
+    const text = fs.readFileSync(file, "utf8")
+    for (const m of text.matchAll(/ctx\.t\(\s*["'`]([^"'`$]+)["'`]/g)) used.add(m[1])
+    for (const m of text.matchAll(/ctx\.t\(\s*`([^`$]*)\$\{/g)) prefixes.add(m[1])
+    for (const m of text.matchAll(/(?<!ctx\.)\bt\(\s*["']([^"']+)["']/g)) used.add(m[1])
+    // 纯逻辑模块里以常量形式引用的键（effectKey / changeLabelKey / COPY_KEYS）
+    for (const m of text.matchAll(/"(perm\.(?:allow|ask|deny))"/g)) used.add(m[1])
+    for (const m of text.matchAll(/"(migrate\.change\.[a-zA-Z]+)"/g)) used.add(m[1])
+    for (const m of text.matchAll(/"(toast\.(?:disabled|enabled))"/g)) used.add(m[1])
+    // error-copy.ts 把键作为值放在 COPY_KEYS 里
+    for (const m of text.matchAll(/"(error\.[a-zA-Z]+)"/g)) used.add(m[1])
+  }
+  const dead = Object.keys(catalog.en).filter((k) => {
+    if (used.has(k)) return false
+    for (const p of prefixes) if (k.startsWith(p)) return false
+    return true
+  })
+  assert.deepEqual(dead, [], `unused keys: ${dead.join(", ")}`)
+})
+
+test("en and zh-Hans key sets match exactly", () => {
+  assert.deepEqual(Object.keys(catalog.en).sort(), Object.keys(catalog["zh-Hans"]).sort())
+})
+
+test("every key's placeholders match between locales", () => {
+  const ph = (s: string) => [...String(s).matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort().join(",")
+  const en = messagesOf("en")
+  const zh = messagesOf("zh-Hans")
+  const bad = Object.keys(en).filter((k) => ph(en[k]) !== ph(zh[k]))
+  assert.deepEqual(bad, [], `placeholder mismatch: ${bad.join(", ")}`)
 })
