@@ -2,6 +2,7 @@
 // 宿主 2.2.6 查插件 catalog 用短码 zh 精确匹配；zh-Hans 只是宿主 <html lang>
 // 用的 BCP-47 标签，不参与 catalog 查找。zh-Hans / zh-CN 两个别名指向同一份
 // 词典（在 index.ts 里注册），保留无害；新增语言一律只注册短码键（见 AGENTS.md 坑 4）。
+// 不定义 page.title：设置入口名全语言统一显示 "Subagent"（原「子智能体」弃用）。
 export const zh = {
     "common.save": "保存",
     "common.cancel": "取消",
@@ -9,7 +10,6 @@ export const zh = {
     "common.rename": "重命名",
     "common.error": "操作失败",
     "common.back": "返回列表",
-    "page.title": "子智能体",
     "page.entry.desc": "管理用户级与项目级子代理",
     "page.keywords": "子智能体 subagent agent 模型 提示词",
     "list.scope": "作用域",

@@ -9,7 +9,9 @@ export const en = {
     "common.rename": "Rename",
     "common.error": "Action failed",
     "common.back": "Back to list",
-    "page.title": "Subagents",
+    // 「Subagent」统一命名：设置入口名（侧边栏列表名 + 页面标题）全语言显示单数
+    // "Subagent"；其余语言不定义 page.title，走 {...en, ...locale} 的 en 回退。
+    "page.title": "Subagent",
     "page.entry.desc": "Manage user-level and project-level subagents",
     "page.keywords": "subagent agents models prompts",
     "list.scope": "Scope",
