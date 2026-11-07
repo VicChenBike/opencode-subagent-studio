@@ -2,7 +2,7 @@
 // 占位符 {{name}} 原样保留）。
 // 不定义 page.title：「Subagent」设置入口名全语言统一，只定义在 en，走 en 回退。
 // 宿主键：ar（短码精确匹配）。阿拉伯语在宿主 RTL_LOCALES 清单内，RTL 布局由宿主
-// 处理；真机抽查见计划 T7。
+// 处理（2026-11-08 真机实测整页 RTL 镜像正常）。
 export const ar = {
     "common.save": "حفظ",
     "common.cancel": "إلغاء",

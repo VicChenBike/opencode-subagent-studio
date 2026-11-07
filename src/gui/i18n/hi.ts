@@ -1,6 +1,6 @@
 // src/gui/i18n/hi.ts —— 印地语词典（AI 翻译，个别措辞可能有歧义；占位符 {{name}} 原样保留）。
 // 不定义 page.title：「Subagent」设置入口名全语言统一，只定义在 en，走 en 回退。
-// 宿主键：hi（短码精确匹配）。渲染真机抽查见计划 T7。
+// 宿主键：hi（短码精确匹配）。天城文渲染已真机实测正常（2026-11-08）。
 export const hi = {
     "common.save": "सहेजें",
     "common.cancel": "रद्द करें",
