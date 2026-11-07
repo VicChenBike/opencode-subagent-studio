@@ -14,6 +14,8 @@ import {
   previewMigrationFile,
 } from "./core/agent-store.ts"
 import { migratePreview } from "./core/frontmatter.ts"
+import { runWithDeclaredErrors } from "./core/rpc-errors.ts"
+import type { ErrorContextLike } from "./core/rpc-errors.ts"
 
 // 未实现方法的桩：P3 逐个替换
 function notImplemented(): never {
@@ -40,7 +42,7 @@ export default Plugin.define({
   id: "subagent-manager",
   async setup(ctx) {
     const reg = await ctx.rpc.register(Subagents, {
-      list: async (input): Promise<ListOutput> => {
+      list: async (input, context): Promise<ListOutput | unknown> => runWithDeclaredErrors(context as unknown as ErrorContextLike, async () => {
         const q = input as { scope: "user" | "project"; projectPath?: string }
         const dir = q.scope === "project" && q.projectPath ? projectAgentsDir(q.projectPath) : userAgentsDir()
         // AgentSummaryRow 与 rpc.AgentSummary 结构逐字段一致
@@ -51,16 +53,16 @@ export default Plugin.define({
           { id: "explore" as const },
         ]
         return { agents, builtins }
-      },
+      }),
 
-      read: async (input): Promise<ReadOutput> => {
+      read: async (input, context): Promise<ReadOutput | unknown> => runWithDeclaredErrors(context as unknown as ErrorContextLike, async () => {
         const q = input as { path: string }
         // read 只拿到绝对路径、无法反推 scope：用户级根 + 任意 <x>/.opencode/agents 形态
         assertAllowedPath(q.path, [userAgentsDir()], "read")
         return await readAgentFile(q.path)
-      },
+      }),
 
-      create: async (input): Promise<CreateOutput> => {
+      create: async (input, context): Promise<CreateOutput | unknown> => runWithDeclaredErrors(context as unknown as ErrorContextLike, async () => {
         const q = input as {
           scope: "user" | "project"; projectPath?: string; id: string
           description: string; body: string; model?: string; color?: string
@@ -81,9 +83,9 @@ export default Plugin.define({
         await ctx.agent.reload()
         await reg.events.emit("changed", {})
         return { path: filePath }
-      },
+      }),
 
-      update: async (input): Promise<UpdateOutput> => {
+      update: async (input, context): Promise<UpdateOutput | unknown> => runWithDeclaredErrors(context as unknown as ErrorContextLike, async () => {
         const q = input as { path: string; expectedHash: string; patch: AgentPatch; force?: boolean }
         const result = await updateAgentFile({
           filePath: q.path,
@@ -95,33 +97,33 @@ export default Plugin.define({
         await ctx.agent.reload()
         await reg.events.emit("changed", {})
         return result
-      },
+      }),
 
-      remove: async (input): Promise<RemoveOutput> => {
+      remove: async (input, context): Promise<RemoveOutput | unknown> => runWithDeclaredErrors(context as unknown as ErrorContextLike, async () => {
         const q = input as { path: string }
         const result = await trashAgentFile({ filePath: q.path, roots: rootsForScopeOf(q.path) })
         await ctx.agent.reload()
         await reg.events.emit("changed", {})
         return result
-      },
+      }),
 
-      rename: async (input): Promise<RenameOutput> => {
+      rename: async (input, context): Promise<RenameOutput | unknown> => runWithDeclaredErrors(context as unknown as ErrorContextLike, async () => {
         const q = input as { path: string; newId: string }
         const result = await renameAgentFile({ filePath: q.path, roots: rootsForScopeOf(q.path), newId: q.newId })
         await ctx.agent.reload()
         await reg.events.emit("changed", {})
         return result
-      },
+      }),
 
-      setDisabled: async (input): Promise<SetDisabledOutput> => {
+      setDisabled: async (input, context): Promise<SetDisabledOutput | unknown> => runWithDeclaredErrors(context as unknown as ErrorContextLike, async () => {
         const q = input as { path: string; disabled: boolean }
         const result = await setDisabledFile({ filePath: q.path, roots: rootsForScopeOf(q.path), disabled: q.disabled })
         await ctx.agent.reload()
         await reg.events.emit("changed", {})
         return result
-      },
+      }),
 
-      models: async (): Promise<ModelsOutput> => {
+      models: async (_input, context): Promise<ModelsOutput | unknown> => runWithDeclaredErrors(context as unknown as ErrorContextLike, async () => {
         const { data } = await ctx.model.list()
         const byProvider = new Map<string, ProviderSummary>()
         for (const m of data) {
@@ -138,17 +140,17 @@ export default Plugin.define({
           })
         }
         return { providers: [...byProvider.values()].sort((a, b) => a.id.localeCompare(b.id)) }
-      },
+      }),
 
       builtinOverrides: async () => notImplemented(), // P3-T5
       setBuiltinModel: async () => notImplemented(),  // P3-T5
 
-      migratePreview: async (input): Promise<MigratePreviewOutput> => {
+      migratePreview: async (input, context): Promise<MigratePreviewOutput | unknown> => runWithDeclaredErrors(context as unknown as ErrorContextLike, async () => {
         const q = input as { path: string }
         assertAllowedPath(q.path, [userAgentsDir()], "read")
         // 文件缺失映射为契约错误码 not_found（中期审查 P3-2）
         return await previewMigrationFile({ filePath: q.path })
-      },
+      }),
 
       watchProject: async () => notImplemented(),     // P3-T2
     })

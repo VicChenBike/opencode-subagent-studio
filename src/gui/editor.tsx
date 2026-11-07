@@ -5,7 +5,7 @@ import { usePlugin } from "@opencode/plugin/gui"
 import { Subagents, ACTIONS } from "../rpc"
 import type { AgentPatch, PermissionMatrix, ReadOutput, ProviderSummary, ModelsOutput, MigrateChange } from "../rpc"
 import { matrixFromRules } from "../core/permissions.ts"
-import { splitModelRef, buildPatch, validateEditor, createInputOf, conflictAction } from "./editor-form"
+import { buildPatch, validateEditor, createInputOf, conflictAction, isConflictError, modelRefFromRead } from "./editor-form"
 import { variantsOf } from "./model-picker-logic"
 import { saveStep } from "./migration-logic"
 import { MigrationDialog } from "./migration-dialog"
@@ -67,7 +67,8 @@ export function EditorPage(props: {
         setFormat(res.format)
         setDescription(typeof meta.description === "string" ? meta.description : "")
         setBody(res.body)
-        const parts = splitModelRef(typeof meta.model === "string" ? meta.model : undefined)
+        // 缺陷 B：V1 的 variant 是独立字段，必须并进 modelRef，否则保存时 patch 会丢掉 #variant
+        const parts = modelRefFromRead(meta, res.format)
         setModel(parts.model)
         setVariant(parts.variant)
         setColor(typeof meta.color === "string" ? meta.color : undefined)
@@ -207,8 +208,7 @@ export function EditorPage(props: {
       await ctx.client.rpc(Subagents).update({ path: pathArg, expectedHash: hash()!, patch: currentPatch() })
       return "saved"
     } catch (e) {
-      const code = String((e as { type?: string; message?: string })?.type ?? (e as { message?: string })?.message ?? "")
-      if (!code.includes("conflict")) throw e
+      if (!isConflictError(e)) throw e
       // goal.md §12.3：冲突三选一（重载 / 强制覆盖 / 取消）
       // 注意：宿主 SelectOptions 没有顶层 description，说明文案挂在各选项上。
       const choice = await ctx.dialogs.select<"reload" | "overwrite">({

@@ -33,10 +33,13 @@ function parseSteps(stepsText: string | undefined): number | undefined {
 
 /** 表单草稿 → RPC patch。model 与 variant 合并；hidden=false 视为不写。 */
 export function buildPatch(draft: EditorDraft): AgentPatch {
+  // draft.model 可能已带后缀（modelRefFromRead 的产物），此时不再重复追加 variant
   const model = draft.model
-    ? draft.variant
-      ? `${draft.model}#${draft.variant}`
-      : draft.model
+    ? draft.model.includes("#")
+      ? draft.model
+      : draft.variant
+        ? `${draft.model}#${draft.variant}`
+        : draft.model
     : undefined
   const patch: AgentPatch = {
     description: draft.description,
@@ -167,4 +170,49 @@ export function createInputOf(params: {
   if (params.patch.hidden !== undefined) out.hidden = params.patch.hidden
   if (params.patch.steps !== undefined) out.steps = params.patch.steps
   return out
+}
+
+/**
+ * 判断一次保存失败是否是「文件已被外部修改」的冲突（goal.md §12.3）。
+ *
+ * 宿主真实形态（客户端 readError 的产物）是 `{ type, message }`，且只有该错误码被契约
+ * 声明过时才原样透出；否则会被包成 `rpc.internal`。桌面端实测过服务端 throw 导致
+ * conflict 变成 500 的情形，所以这里同时容忍：
+ * - 顶层 type 命中
+ * - type 藏在 data / cause 里
+ * - Error 实例的 message 含 conflict（向后兼容旧行为）
+ */
+export function isConflictError(error: unknown): boolean {
+  if (error === null || error === undefined) return false
+  const hit = (value: unknown, depth: number): boolean => {
+    if (value === null || typeof value !== "object" || depth > 3) return false
+    const obj = value as Record<string, unknown>
+    if (obj.type === "conflict") return true
+    if (typeof obj.message === "string" && obj.message.includes("conflict")) return true
+    return hit(obj.data, depth + 1) || hit(obj.cause, depth + 1)
+  }
+  return hit(error, 0)
+}
+
+/**
+ * 从 read 结果的 meta 还原模型引用（缺陷 B）。
+ *
+ * V1 文件把模型写成两个字段：`model: a/b` + `variant: high`；V2 只有一个 `model: a/b#high`。
+ * 若 GUI 只读 meta.model，V1 的 variant 会在编辑期间丢失，保存时 patch.model（无后缀）
+ * 又会覆盖 migrateContent 产生的 `#high`，落盘就少了思考深度。
+ *
+ * 规则：model 里已有 `#` 时以它为准；否则把 V1 的 variant 并进去。
+ */
+export function modelRefFromRead(
+  meta: Record<string, unknown>,
+  format: "v1" | "v2",
+): { model?: string; variant?: string } {
+  const raw = typeof meta.model === "string" && meta.model.length > 0 ? meta.model : undefined
+  if (raw === undefined) return { model: undefined, variant: undefined }
+  // 已带后缀：保持完整引用（splitModelRef 会剥离后缀，这里不能直接用它的 model 字段）
+  if (raw.includes("#")) return { model: raw, variant: raw.slice(raw.indexOf("#") + 1) || undefined }
+  const variant = format === "v1" && typeof meta.variant === "string" && meta.variant.length > 0
+    ? meta.variant
+    : undefined
+  return variant === undefined ? { model: raw, variant: undefined } : { model: `${raw}#${variant}`, variant }
 }

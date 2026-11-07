@@ -64,6 +64,16 @@ export interface MigrateChange {
   to?: string
 }
 
+/** 契约声明的错误码全集（§1.2）。handler 必须用 context.error 返回其中之一，不能 throw。 */
+export type ErrorCode =
+  | "invalid_path"
+  | "invalid_id"
+  | "reserved_id"
+  | "exists"
+  | "not_found"
+  | "conflict"
+  | "migration_required"
+
 export interface ListInput { scope: "user" | "project"; projectPath?: string }
 export interface ListOutput { agents: AgentSummary[]; builtins: BuiltinSummary[] }
 export interface ReadInput { path: string }

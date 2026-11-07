@@ -3,7 +3,8 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
-  splitModelRef, buildPatch, validateEditor, patchFromRead, conflictAction, createInputOf,
+  splitModelRef, buildPatch, validateEditor, patchFromRead, conflictAction, createInputOf, isConflictError,
+  modelRefFromRead,
 } from "../src/gui/editor-form.ts"
 import type { ReadOutput } from "../src/rpc.ts"
 
@@ -160,4 +161,66 @@ test("validateEditor reports duplicate once the new id appears in existingIds", 
   assert.equal(before.idError, undefined)
   const after = validateEditor({ mode: "create", id: "fresh", description: "d", stepsText: "", existingIds: ["fresh"] })
   assert.equal(after.idError, "duplicate")
+})
+
+// 缺陷 A 回归：GUI 必须能识别宿主真实传回的 conflict 错误形态。
+// 桌面端实测：服务端抛普通 Error 时被包成 rpc.internal/500，GUI 只弹通用 toast。
+// 服务端已改为返回 context.error("conflict", ...)，客户端 readError 透出 { type, message }。
+test("isConflictError recognises the host's { type, message } error shape", () => {
+  assert.equal(isConflictError({ type: "conflict", message: "file changed on disk" }), true)
+})
+
+test("isConflictError tolerates a nested or wrapped payload", () => {
+  // 某些路径会把错误放在 data / cause 里
+  assert.equal(isConflictError({ type: "rpc.internal", message: "x", data: { type: "conflict" } }), true)
+  assert.equal(isConflictError({ cause: { type: "conflict", message: "x" } }), true)
+  // 消息里带 conflict 字样（旧行为）仍算命中，保持向后兼容
+  assert.equal(isConflictError(new Error("conflict: file changed on disk")), true)
+})
+
+test("isConflictError rejects unrelated failures", () => {
+  assert.equal(isConflictError(undefined), false)
+  assert.equal(isConflictError(null), false)
+  assert.equal(isConflictError({ type: "not_found", message: "gone" }), false)
+  assert.equal(isConflictError(new Error("RPC call failed")), false)
+  assert.equal(isConflictError({ type: "rpc.internal", message: "boom" }), false)
+  assert.equal(isConflictError("conflict"), false)
+})
+
+// 缺陷 B 回归：V1 文件里 model 与 variant 是两个独立字段。
+// 桌面端实测：GUI 只读 meta.model（不含 variant），编辑页深度下拉显示「无」，
+// 保存时 patch.model（无 #high）覆盖了 migrateContent 产生的 model: a/b#high。
+// 修复：read 侧把 V1 的 variant 并进 modelRef，使 patch 天然保留 variant。
+test("modelRefFromRead folds a v1 variant into provider/model#variant", () => {
+  const ref = modelRefFromRead({ model: "acme/standard", variant: "high" }, "v1")
+  assert.equal(ref.model, "acme/standard#high")
+  assert.equal(ref.variant, "high")
+})
+
+test("modelRefFromRead leaves an already-suffixed v2 model alone", () => {
+  const ref = modelRefFromRead({ model: "acme/standard#high" }, "v2")
+  assert.equal(ref.model, "acme/standard#high")
+  assert.equal(ref.variant, "high")
+})
+
+test("modelRefFromRead returns an empty ref when the file has no model", () => {
+  assert.deepEqual(modelRefFromRead({}, "v1"), { model: undefined, variant: undefined })
+  assert.deepEqual(modelRefFromRead({}, "v2"), { model: undefined, variant: undefined })
+})
+
+test("modelRefFromRead does not double-suffix when v1 already has a hash", () => {
+  const ref = modelRefFromRead({ model: "acme/standard#low", variant: "high" }, "v1")
+  assert.equal(ref.model, "acme/standard#low", "an explicit suffix wins over the variant field")
+  assert.equal(ref.variant, "low")
+})
+
+// 全链路：read V1 → buildPatch → 落盘后 #high 仍在
+test("buildPatch keeps the variant that modelRefFromRead recovered", () => {
+  const ref = modelRefFromRead({ model: "acme/standard", variant: "high" }, "v1")
+  const patch = buildPatch({
+    description: "d", body: "b",
+    model: ref.model, variant: ref.variant,
+    matrix: MATRIX,
+  })
+  assert.equal(patch.model, "acme/standard#high")
 })

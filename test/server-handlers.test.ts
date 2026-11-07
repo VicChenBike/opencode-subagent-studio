@@ -276,3 +276,62 @@ Old body.
   assert.ok(raw.includes("model: acme/standard#high"), "model and variant merged")
   assert.ok(raw.includes("git push *"), "fine-grained shell rule preserved")
 }))
+
+// 缺陷 B 全链路回归：V1 文件（model + 独立 variant）经 GUI 编辑保存后，#variant 必须保留。
+// 桌面端实测过丢 variant 的路径：read 只取 meta.model → 深度下拉显示「无」→ patch.model 无后缀
+// → 覆盖掉 migrateContent 产生的 #high。
+test("v1 save keeps the variant the GUI recovered from the separate field", withTempAgents({
+  "legacy.md": `---
+name: legacy
+description: Old
+mode: subagent
+model: acme/standard
+variant: high
+permission:
+  read: allow
+---
+
+body
+`,
+}, async (dir) => {
+  const { readAgentFile, updateAgentFile, previewMigrationFile } = await import("../src/core/agent-store.ts")
+  const { modelRefFromRead, buildPatch } = await import("../src/gui/editor-form.ts")
+  const file = path.join(dir, "legacy.md")
+
+  // 1. read：GUI 拿到的 meta 里 model 与 variant 是分开的
+  const res = await readAgentFile(file)
+  assert.equal(res.format, "v1")
+  assert.equal((res.meta as Record<string, unknown>).variant, "high")
+
+  // 2. GUI 还原模型引用（修复点）
+  const ref = modelRefFromRead(res.meta as Record<string, unknown>, res.format)
+  assert.equal(ref.model, "acme/standard#high", "read must expose the combined ref")
+  assert.equal(ref.variant, "high", "depth dropdown must show high")
+
+  // 3. 迁移预览也确认 #high（服务端本来就对）
+  const preview = await previewMigrationFile({ filePath: file })
+  assert.ok(preview.after.includes("model: acme/standard#high"))
+
+  // 4. GUI 保存：patch.model 必须带后缀
+  const matrix = {
+    defaultEffect: "allow" as const,
+    actions: { read: "allow", glob: "allow", grep: "allow", edit: "allow", shell: "allow",
+      webfetch: "allow", websearch: "allow", skill: "allow", subagent: "allow", question: "allow" } as const,
+  }
+  const patch = buildPatch({
+    description: "New", body: "new body\n",
+    model: ref.model, variant: ref.variant,
+    matrix,
+  })
+  assert.equal(patch.model, "acme/standard#high", "patch must carry the variant")
+
+  await updateAgentFile({ filePath: file, roots: [dir], expectedHash: res.hash, patch })
+
+  // 5. 落盘结果：#high 保留，且是纯 V2
+  const after = await readAgentFile(file)
+  assert.equal(after.format, "v2")
+  assert.equal((after.meta as Record<string, unknown>).model, "acme/standard#high", "variant must survive the save")
+  const raw = await (await import("node:fs/promises")).readFile(file, "utf8")
+  assert.ok(raw.includes("model: acme/standard#high"))
+  assert.ok(!raw.includes("variant:"), "v2 has no separate variant field")
+}))
