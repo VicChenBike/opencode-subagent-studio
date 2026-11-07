@@ -103,3 +103,12 @@ export interface AgentSummaryRow {
   hash: string
   mtime: number
 }
+
+export async function readAgentFile(
+  filePath: string,
+): Promise<{ meta: Record<string, unknown>; body: string; format: "v1" | "v2"; hash: string; mtime: number }> {
+  const content = await fs.readFile(filePath, "utf8")
+  const parsed = parseAgentFile(content)
+  const st = await statOr(filePath)
+  return { meta: parsed.meta, body: parsed.body, format: parsed.format, hash: hashOf(content), mtime: st?.mtime ?? 0 }
+}
