@@ -2,13 +2,13 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Manage OpenCode V2 subagents from the desktop app: a settings page to view, create, edit, disable, rename and trash subagent markdown files, with live sync for user-level agents and on-demand refresh for project scopes.
+Manage OpenCode V2 subagents from the desktop app: a settings page to view, create, edit, disable, rename subagent markdown files and move them to trash, with live sync for the user-level agents directory and on-demand refresh for project scopes.
 
-> **Translate this README:** this document is maintained in English; the Chinese version lives in [README.zh-CN.md](README.zh-CN.md). If you read another language, you are welcome to translate this README with your own AI agent — the text is self-contained and machine-translation friendly.
+> **Translate this README:** this document is maintained in English; the Chinese version lives in [README.zh-CN.md](README.zh-CN.md). If neither of these two languages works for you, you are welcome to translate this README with your own AI agent — the text is self-contained and machine-translation friendly.
 
-> **UI dictionary disclaimer:** the plugin ships interface dictionaries for 11 languages (English, 简体中文, Français, Español, Português do Brasil, Русский, العربية, Deutsch, 日本語, हिन्दी, 한국어). They are AI-translated and may read ambiguously; when in doubt, the English copy is authoritative. The settings entry is named "Subagent" in every language.
+> **UI dictionary disclaimer:** the plugin ships interface dictionaries for 11 languages (English, 简体中文, Français, Español, Português do Brasil, Русский, العربية, Deutsch, 日本語, हिन्दी, 한국어). They are AI-translated and may be ambiguous; when in doubt, the English copy is authoritative. The settings entry is named "Subagent" in every language.
 
-> **Status:** feature-complete for OpenCode Desktop 2.2.5 and verified compatible with 2.2.6. The upstream plugin API is experimental, so a newer desktop release may still break the plugin. It is hosted at <https://github.com/VicChenBike/opencode-subagent-studio>.
+> **Status:** feature-complete for OpenCode Desktop 2.2.5 and verified compatible with 2.2.6. The upstream plugin API is experimental, so a newer desktop release may still break the plugin. Source repository: <https://github.com/VicChenBike/opencode-subagent-studio>.
 
 ---
 
@@ -21,7 +21,7 @@ Manage OpenCode V2 subagents from the desktop app: a settings page to view, crea
 | **Edit** | Description, colour, model with reasoning effort, three-state permission matrix (allow / ask / deny), system prompt, max steps, hidden |
 | **Rename** | Warning first, then the new ID; refuses an existing target |
 | **V1 → V2 migration** | Whole-file conversion per the official rules, previewed before saving; comments and unknown fields preserved |
-| **Trash** | Deletes move to `agents-trash/` beside the agents directory, restorable by hand |
+| **Trash** | Deleted agents move to `agents-trash/` beside the agents directory and can be restored by hand |
 | **Built-in overrides** | Switch `general` / `explore` models at runtime through plugin storage; nothing is written to `opencode.jsonc` |
 | **Live sync** | `fs.watch` + 300 ms debounce + `agent.reload()`; user-level directories refresh automatically. In the current build, external changes in a project scope need the Refresh button |
 | **i18n** | 11 interface languages (en, zh, fr, es, br, ru, ar, de, ja, hi, ko), AI-translated; the settings entry reads "Subagent" in every language |
@@ -38,7 +38,7 @@ Manage OpenCode V2 subagents from the desktop app: a settings page to view, crea
 
 ## Compatibility
 
-- **OpenCode Desktop 2.2.5 / 2.2.6** — built against 2.2.5, verified compatible on 2.2.6. The plugin API is marked experimental upstream, so releases beyond that may change it and break this plugin.
+- **OpenCode Desktop 2.2.5 / 2.2.6** — built against 2.2.5, verified compatible on 2.2.6. The plugin API is marked experimental upstream, so later releases may change the API and break this plugin.
 - The server half needs a Node-compatible runtime (the desktop ships one). The GUI half is a single CommonJS bundle loaded by the desktop renderer.
 - The plugin makes no network requests and collects no telemetry.
 
@@ -74,12 +74,12 @@ Use your platform's path separator and escape backslashes in JSON, for example o
 ### List page
 
 - **Scope menu** (top left): switch between `This computer · User` (default) and any project known to the desktop; project agents live in `<project>/.opencode/agents/`. The **count** next to it reflects the currently shown rows, so it shrinks while a search filter is active.
-- **Search** filters by ID and description, case-insensitive. **Refresh** re-reads from disk. User-level directories refresh automatically; in the current build, external changes in a project scope need this button.
+- **Search** filters by ID and description, case-insensitive. **Refresh** re-reads from disk. User-level directories refresh automatically; in the current build, external changes in a project scope require a manual refresh with this button.
 - **New** opens a blank editor inheriting the current scope. The ID must match `^[a-z][a-z0-9-]{0,63}$` (lowercase letters, digits, hyphens; ≤ 64 chars) and cannot be one of the reserved IDs `build`, `plan`, `general`, `explore`, `compaction`, `title`, `summary`. An existing file is never overwritten.
 
 ### Rows
 
-Each custom agent row shows a colour dot (theme grey when unset), the name, a model badge (the raw `provider/model` or `provider/model#variant` string; no badge when no model is set), a "Hidden" badge for `hidden: true`, a "Disabled" badge when switched off, plus a per-row switch and trash button. Click a custom agent row to edit it.
+Each custom agent row shows a colour dot (theme grey when unset), the name, and a model badge (the raw `provider/model` or `provider/model#variant` string; no badge when no model is set). A "Hidden" badge marks `hidden: true`, a "Disabled" badge marks a switched-off agent; each row also has a switch and a trash button. Click a custom agent row to edit it.
 
 - The **switch** is an enable switch (blue/on = enabled, following the host convention). Toggling it writes `disabled`: a disabled agent stays on disk but is removed from the loaded configuration; its row dims and shows the "Disabled" badge.
 - The **trash button** moves the file to `agents-trash/` (see "Restore from trash" below) after a confirmation.
@@ -92,12 +92,12 @@ Pinned at the bottom: `general` ("All tools") and `explore` ("Read-only"). They 
 
 - **Name** is read-only after creation; **Rename** first warns that the agent ID equals the file name, so references to it in prompts or other agents will break, then refuses an ID that already exists.
 - **Colour**: eight preset dots plus "none"; writes `color: "#rrggbb"`.
-- **Model** opens a picker grouped by provider with a search box; the **reasoning-effort** dropdown next to it lists the selected model's variants. It shows "None" when the model has no variants or when "Inherit default" is chosen. "Inherit default" simply omits `model` from the file.
+- **Model** opens a picker grouped by provider with a search box; the **reasoning-effort** dropdown next to it lists the selected model's variants. The dropdown shows "None" when the model has no variants or when "Inherit default" is chosen. "Inherit default" simply omits `model` from the file.
 - **Description** is required — it is what the parent model sees when choosing a subagent.
 - **Permissions** is a three-state matrix over ten actions (`read`, `glob`, `grep`, `edit`, `shell`, `webfetch`, `websearch`, `skill`, `subagent`, `question`) plus a default: **allow** = runs normally, **ask** = the user is asked every time, **deny** = refused. Fine-grained rules already in the file are preserved and keep priority (the last matching rule wins).
 - **System prompt** is the markdown body; **Max steps** writes `steps` (empty = unset); **Hidden** writes `hidden: true` — the agent stays callable, just not advertised to the model.
-- **Saving a V1 file** first opens a side-by-side migration preview; confirming converts the whole file to V2 (see "How it works"). The editor already shows the migration-effective content (a legacy `prompt:` field appears as the body, `model` + `variant` as one reference), so toggling or saving a V1 agent never loses its prompt, variant, max steps or tool denials.
-- **Save conflict**: the editor records the file hash when it opens. If the file changed on disk, the save is refused and a dialog offers **Reload** or **Overwrite**. **Reload** (or dismissing the dialog with Esc / a click outside) leaves the editor and returns to the list. **Overwrite** keeps your form and first copies the current disk content to the trash folder as `.backup-<timestamp>-<name>.md`.
+- **Saving a V1 file** first opens a side-by-side migration preview; confirming converts the whole file to V2 (see "How it works"). The editor already shows the content as it will be after migration (a legacy `prompt:` field appears as the body, `model` + `variant` as one reference), so toggling or saving a V1 agent never loses its prompt, variant, max steps or tool denials.
+- **Save conflict**: the editor records the file hash when it opens. If the file changed on disk, the save is refused and a dialog offers **Reload** or **Overwrite**. **Reload** — or dismissing the dialog with Esc / a click outside — leaves the editor and returns to the list. **Overwrite** keeps your form and first copies the current disk content to the trash folder as `.backup-<timestamp>-<name>.md`.
 
 ## How it works
 
@@ -122,11 +122,11 @@ Two cooperating processes:
 
 **Live sync.** The server watches the user-level `agents/` directory continuously. The `watchProject` RPC exists and the server can watch a project directory, but the current GUI does not call it, so external changes in a project scope are not picked up automatically — use **Refresh**. Disk changes are debounced for 300 ms (Windows fires several events per save), then trigger `agent.reload()` and a `changed` event. When the editor is open, the page only shows a "Disk changed" toast and does not overwrite the form.
 
-**V1 → V2 migration.** A file whose frontmatter contains any of `permissions`, `request`, `system`, `disabled` is read as V2 as a whole; anything else is read as V1 (legacy). Saving a V1 file from the editor first shows a side-by-side migration preview: `permission` map → `permissions` rule array, `disable` → `disabled`, `model` + `variant` → `provider/model#variant`, `maxSteps` → `steps`; `name`, `temperature`, `top_p` and `options` are dropped; `tools` entries set to `false` become `deny` rules; V1 action names are renamed (`bash`→`shell`, `task`→`subagent`, `write`/`patch`→`edit`); nested permission values are expanded into multiple rules. The markdown body is kept as-is, except that a non-empty V1 `prompt` is merged into the body when the body is empty. The conversion rewrites the entire file in one pass with the `yaml` Document API, so comments, key order and unknown fields survive.
+**V1 → V2 migration.** If a file's frontmatter contains any of `permissions`, `request`, `system` or `disabled`, the whole file is read as V2; anything else is read as V1 (legacy). Saving a V1 file from the editor first shows a side-by-side migration preview: `permission` map → `permissions` rule array, `disable` → `disabled`, `model` + `variant` → `provider/model#variant`, `maxSteps` → `steps`; `name`, `temperature`, `top_p` and `options` are dropped; `tools` entries set to `false` become `deny` rules; V1 action names are renamed (`bash`→`shell`, `task`→`subagent`, `write`/`patch`→`edit`); nested permission values are expanded into multiple rules. The markdown body is kept as-is, except that a non-empty V1 `prompt` is merged into the body when the body is empty. The conversion rewrites the entire file in one pass with the `yaml` Document API, so comments, key order and unknown fields survive.
 
 **Built-in overrides.** `general` and `explore` are OpenCode's built-in subagents; the plugin can only change their model. An override is stored in the plugin's own key-value storage (`builtin-model.general` / `builtin-model.explore`) and injected at runtime through `ctx.agent.transform`, which replays after every agent reload. Nothing is written to `opencode.jsonc`, and removing the plugin removes the overrides.
 
-**Conflict detection.** Opening the editor records the file's hash. Saving sends that hash back; if the file changed on disk in the meantime the server refuses with `conflict` and the GUI offers **Reload** (leave the editor and return to the list) or **Overwrite** (keep the form). Dismissing the dialog also leaves the editor. Forcing the overwrite first copies the current file into the trash folder as `.backup-<timestamp>-<name>.md`. All writes are atomic (temporary file + rename in the same directory), so a crash or full disk mid-write cannot truncate an agent file. Existing files keep their original line endings (LF or CRLF), and a UTF-8 BOM is dropped on the first write.
+**Conflict detection.** Opening the editor records the file's hash. Saving sends that hash back; if the file changed on disk in the meantime, the server refuses with `conflict` and the GUI offers **Reload** (leave the editor and return to the list) or **Overwrite** (keep the form). Dismissing the dialog also leaves the editor. Forcing the overwrite first copies the current file into the trash folder as `.backup-<timestamp>-<name>.md`. All writes are atomic (temporary file + rename in the same directory), so a crash or full disk mid-write cannot truncate an agent file. Existing files keep their original line endings (LF or CRLF), and a UTF-8 BOM is dropped on the first write.
 
 ## Limitations
 
@@ -136,7 +136,7 @@ Honest list of what this plugin does not do:
 - **`mode: all` agents are not listed** — the list shows only files whose `mode` is exactly `subagent`.
 - **Project-level live sync is not wired in the current build** — the `watchProject` RPC exists, but the GUI does not call it. External changes in a project scope need the Refresh button.
 - **Project scopes depend on the desktop's project list** — a project the desktop has not indexed cannot be selected.
-- **A V1 file is always migrated whole on first save from the editor** — the plugin cannot keep a file in the legacy V1 format.
+- **A V1 file is always migrated as a whole on first save from the editor** — the plugin cannot keep a file in the legacy V1 format.
 - **No restore UI for the trash** — restoring is manual: move the file back into `agents/`.
 - **Renaming breaks references** — the agent ID is the file name; prompts or other agents that call it by ID must be updated by hand.
 - **Nested agent files are listed but cannot be created from the UI** — a file at `agents/team/reviewer.md` is shown with ID `team/reviewer` and can be edited; the New/Rename dialogs only accept flat IDs, and renaming a nested agent keeps it in its subfolder.
@@ -165,7 +165,7 @@ npm run build     # single-file CJS bundle at dist/gui-experimental.cjs
 npm run watch     # rebuild the GUI on change; server changes need an app restart
 ```
 
-The build must produce exactly one file in `dist/`. Modules the desktop provides (`solid-js`, `solid-js/web`, `@opencode/plugin/gui`, `@opencode/plugin/rpc`) stay external; the build fails if anything else from those families is bundled. The GUI bundle must contain no dynamic imports.
+The build must produce exactly one file in `dist/`. Modules the desktop provides (`solid-js`, `solid-js/web`, `@opencode/plugin/gui`, `@opencode/plugin/rpc`) stay external; the build fails if anything else from these packages is bundled. The GUI bundle must contain no dynamic imports.
 
 ## Restore from trash
 
@@ -180,7 +180,7 @@ Files are named `<yyyyMMdd-HHmmss>-<original-name>.md`; when two same-named file
 
 1. Remove the plugin directory entry from the `plugins` array in `opencode.jsonc`.
 2. Fully restart the desktop app.
-3. Optionally delete the plugin folder. Your agent markdown files and `agents-trash/` are not touched; built-in model overrides disappear with the plugin.
+3. Optionally delete the plugin folder. Your agent markdown files and `agents-trash/` are left untouched; built-in model overrides disappear with the plugin.
 
 ## Data and privacy
 
@@ -194,7 +194,7 @@ It makes no network requests and collects no telemetry.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Released under the MIT license. See [LICENSE](LICENSE).
 
 ## Acknowledgements
 
