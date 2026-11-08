@@ -58,6 +58,13 @@ function pathKey(p: string): string {
   return process.platform === "win32" ? resolved.toLowerCase() : resolved
 }
 
+// basename 比较键：agentsRootOf 的目录名判定同样要跟随 win32 大小写不敏感（第十一轮 F4），
+// 否则混合大小写的 .OpenCode/Agents 路径找不到根，回收站落回 agents/ 内部（C4 变体）。
+function baseNameKey(p: string): string {
+  const base = path.basename(p)
+  return process.platform === "win32" ? base.toLowerCase() : base
+}
+
 // goal.md §14.4：path.resolve + 前缀白名单，拒绝 .. 穿越。
 // mode="read" 额外放行任意 <x>/.opencode/agents(/**) 形态（read 只拿到绝对路径、无法反推 scope，只读安全）；
 // 写入操作必须 mode="write"（默认）走严格根白名单。
@@ -224,16 +231,49 @@ async function assertWritable(filePath: string, roots: readonly string[]): Promi
 }
 
 // 原子写：先写同目录临时文件再 rename 覆盖。中途崩溃/磁盘满不会把原文件截断（第六轮 I2）。
+// writeFile 失败也要清理 tmp（第十一轮 F7：原来只有 rename 失败有清理）。
 async function atomicWrite(filePath: string, content: string): Promise<void> {
   const tmpFile = `${filePath}.tmp-${crypto.randomBytes(6).toString("hex")}`
   await fs.mkdir(path.dirname(filePath), { recursive: true })
-  await fs.writeFile(tmpFile, content, "utf8")
   try {
+    await fs.writeFile(tmpFile, content, "utf8")
     await fs.rename(tmpFile, filePath)
   } catch (err) {
     await fs.rm(tmpFile, { force: true }).catch(() => {})
     throw err
   }
+}
+
+// no-clobber 原子写（第十一轮 F1）：rename 在 Windows 会静默覆盖已存在目标，
+// 「先读检查再写」在并发下两个调用都能通过检查。link 占位是原子的：目标已存在即 EEXIST。
+async function atomicWriteNew(filePath: string, content: string): Promise<void> {
+  const tmpFile = `${filePath}.tmp-${crypto.randomBytes(6).toString("hex")}`
+  await fs.mkdir(path.dirname(filePath), { recursive: true })
+  try {
+    await fs.writeFile(tmpFile, content, "utf8")
+    await fs.link(tmpFile, filePath)
+  } catch (err) {
+    await fs.rm(tmpFile, { force: true }).catch(() => {})
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+      fail("exists", `agent file already exists: ${filePath}`)
+    }
+    throw err
+  }
+  await fs.rm(tmpFile, { force: true }).catch(() => {})
+}
+
+// no-clobber 移动（第十一轮 F1）：link 占位 + 删源。中途崩溃最坏留下两个名字指向同一内容，
+// 不会丢数据；rename 在 Windows 静默覆盖目标则会让输家源文件直接消失。
+async function moveNoClobber(from: string, to: string): Promise<void> {
+  try {
+    await fs.link(from, to)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === "EEXIST") fail("exists", `target already exists: ${to}`)
+    if (code === "ENOENT") fail("not_found", `agent file not found: ${from}`)
+    throw err
+  }
+  await fs.unlink(from)
 }
 
 // 只有 ENOENT 才算「不存在」；EBUSY/EACCES 等必须上抛，
@@ -266,13 +306,13 @@ export function agentsRootOf(filePath: string): string {
   const candidates: string[] = []
   let dir = path.dirname(resolved)
   for (;;) {
-    if (path.basename(dir) === "agents") candidates.push(dir)
+    if (baseNameKey(dir) === "agents") candidates.push(dir)
     const parent = path.dirname(dir)
     if (parent === dir) break
     dir = parent
   }
   const valid = candidates.filter(
-    (d) => pathKey(d) === pathKey(userRoot) || path.basename(path.dirname(d)) === ".opencode",
+    (d) => pathKey(d) === pathKey(userRoot) || baseNameKey(path.dirname(d)) === ".opencode",
   )
   return valid[valid.length - 1] ?? candidates[0] ?? path.dirname(resolved)
 }
@@ -294,20 +334,35 @@ export async function createAgentFile(params: {
   if ((await readRawOrNull(filePath)) !== null) {
     fail("exists", `agent file already exists: ${filePath}`)
   }
-  await atomicWrite(filePath, createV2Content(params))
+  await atomicWriteNew(filePath, createV2Content(params))
   return filePath
 }
 
 // 回收站目标名去重：同一秒内两个同名文件（如 agents/a/reviewer.md 与 agents/b/reviewer.md）
 // 不能互相覆盖。从原名开始，冲突时在扩展名前依次插入 -1、-2…，最多尝试 100 次（第七轮 R7-4）。
-async function uniqueTarget(trash: string, base: string): Promise<string> {
+// 第十一轮 F1：占位必须原子——stat 检查在并发下会双双通过，link/copyFile(EXCL) 失败才重试下一个。
+function trashCandidateNames(trash: string, base: string): string[] {
   const ext = path.extname(base)
   const stem = base.slice(0, base.length - ext.length)
+  const names: string[] = []
   for (let i = 0; i < 100; i++) {
-    const name = i === 0 ? base : `${stem}-${i}${ext}`
-    const candidate = path.join(trash, name)
-    const exists = await fs.stat(candidate).then(() => true).catch(() => false)
-    if (!exists) return candidate
+    names.push(path.join(trash, i === 0 ? base : `${stem}-${i}${ext}`))
+  }
+  return names
+}
+
+async function moveIntoTrash(filePath: string, trash: string, base: string): Promise<string> {
+  for (const candidate of trashCandidateNames(trash, base)) {
+    try {
+      await fs.link(filePath, candidate)
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === "EEXIST") continue
+      if (code === "ENOENT") fail("not_found", `agent file not found: ${filePath}`)
+      throw err
+    }
+    await fs.unlink(filePath)
+    return candidate
   }
   fail("exists", `cannot find a free trash name for: ${base}`)
 }
@@ -315,9 +370,17 @@ async function uniqueTarget(trash: string, base: string): Promise<string> {
 async function backupToTrash(filePath: string, agentsDir: string): Promise<string> {
   const trash = trashDirFor(agentsDir)
   await fs.mkdir(trash, { recursive: true })
-  const target = await uniqueTarget(trash, `.backup-${timestampStamp()}-${path.basename(filePath)}`)
-  await fs.copyFile(filePath, target)
-  return target
+  const base = `.backup-${timestampStamp()}-${path.basename(filePath)}`
+  for (const candidate of trashCandidateNames(trash, base)) {
+    try {
+      await fs.copyFile(filePath, candidate, fs.constants.COPYFILE_EXCL)
+      return candidate
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") continue
+      throw err
+    }
+  }
+  fail("exists", `cannot find a free trash name for: ${base}`)
 }
 
 export async function updateAgentFile(params: {
@@ -346,9 +409,14 @@ export async function setDisabledFile(params: {
   filePath: string
   roots: readonly string[]
   disabled: boolean
+  expectedHash: string
 }): Promise<{ hash: string }> {
   await assertWritable(params.filePath, params.roots)
   const raw = await readRaw(params.filePath)
+  // CAS（第十一轮 F9）：读-改-写之间文件可能被外部改动，hash 不一致即 conflict，绝不静默覆盖
+  if (hashOf(raw) !== params.expectedHash) {
+    fail("conflict", `file changed on disk: ${params.filePath}`)
+  }
   const parsed = parseAgentFile(raw)
   // goal.md §5.3：对 V1 文件写 disabled 会触发整份切 V2，必须先走迁移预览
   if (parsed.format === "v1") {
@@ -390,8 +458,8 @@ export async function renameAgentFile(params: {
     doc.delete("name")
     content = applyEol(`---\n${doc.toString().replace(/\n$/, "")}\n---\n\n${body}`, detectEol(raw))
   }
-  // 先改名再写内容：rename 失败时原文件必须原封不动（不能先把 name 删了再失败，第七轮审查）
-  await fs.rename(params.filePath, target)
+  // 先改名再写内容：改名失败时原文件必须原封不动（不能先把 name 删了再失败，第七轮审查）
+  await moveNoClobber(params.filePath, target)
   if (content !== raw) await atomicWrite(target, content)
   return { path: target }
 }
@@ -407,8 +475,7 @@ export async function trashAgentFile(params: {
   const trash = trashDirFor(agentsRootOf(params.filePath))
   await fs.mkdir(trash, { recursive: true })
   // 文件名：<yyyyMMdd-HHmmss>-<原名>.md（goal.md §10）；同秒同名追加 -1/-2…（第七轮 R7-4）
-  const target = await uniqueTarget(trash, `${timestampStamp()}-${path.basename(params.filePath)}`)
-  await fs.rename(params.filePath, target)
+  const target = await moveIntoTrash(params.filePath, trash, `${timestampStamp()}-${path.basename(params.filePath)}`)
   return { trashPath: target }
 }
 

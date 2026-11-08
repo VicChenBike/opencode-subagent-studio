@@ -158,7 +158,7 @@ test("R7-10: setDisabledFile keeps CRLF line endings", async () => {
   try {
     const file = path.join(root, "v2.md")
     fs.writeFileSync(file, "---\r\ndescription: x\r\nmode: subagent\r\npermissions:\r\n  - action: read\r\n    resource: \"*\"\r\n    effect: allow\r\n---\r\n\r\nline1\r\nline2\r\n")
-    await setDisabledFile({ filePath: file, roots: [root], disabled: true })
+    await setDisabledFile({ filePath: file, roots: [root], disabled: true, expectedHash: (await readAgentFile(file)).hash })
     assert.doesNotMatch(fs.readFileSync(file, "utf8"), /[^\r]\n/, "setDisabledFile must keep CRLF")
   } finally {
     fs.rmSync(root, { recursive: true, force: true })

@@ -56,6 +56,8 @@ export function EditorPage(props: {
   const [matrix, setMatrix] = createSignal<PermissionMatrix>(defaultMatrix())
   const [draftId, setDraftId] = createSignal(props.target.draftId ?? "")
   const [saving, setSaving] = createSignal(false)
+  // 迁移预览打开期间禁止再次触发保存（第十一轮 GUI-5：否则会叠加第二个预览弹窗）
+  const [previewOpen, setPreviewOpen] = createSignal(false)
   // V1 文件本次编辑是否已确认迁移预览（goal.md §9.1：首次保存前弹一次）
   const [migrateConfirmed, setMigrateConfirmed] = createSignal(false)
 
@@ -135,6 +137,7 @@ export function EditorPage(props: {
     if (!validation().canSave || saving()) return
     // V1 文件先弹迁移预览；确认后由预览弹窗的回调继续走 runSave（不在这里 await 预览结果）
     if (saveStep({ mode: props.target.mode, format: format(), migrateConfirmed: migrateConfirmed() }) === "preview") {
+      if (previewOpen()) return
       await openMigrationPreview()
       return
     }
@@ -182,6 +185,7 @@ export function EditorPage(props: {
         after: string
         changes: MigrateChange[]
       }
+      setPreviewOpen(true)
       ctx.dialogs.open((dialog) => (
         <MigrationDialog
           ctx={ctx}
@@ -189,11 +193,13 @@ export function EditorPage(props: {
           after={preview.after}
           changes={preview.changes}
           onConfirm={() => {
+            setPreviewOpen(false)
             dialog.close()
             setMigrateConfirmed(true)
             void runSave()
           }}
-          onCancel={() => dialog.close()}
+          onCancel={() => { setPreviewOpen(false); dialog.close() }}
+          onClosed={() => setPreviewOpen(false)}
         />
       ))
     } catch (e) {
@@ -442,27 +448,33 @@ export function EditorPage(props: {
 function DepthSelect(props: { model?: string; variant?: string; onPick: (v?: string) => void }) {
   const ctx = usePlugin()
   const [providers, setProviders] = createSignal<ProviderSummary[]>([])
+  // 拉取失败要显示错误态，不能静默吞成「无深度」（第十一轮 GUI-4）
+  const [loadError, setLoadError] = createSignal<string | undefined>(undefined)
   onMount(() => {
     void (async () => {
       try {
         const res = (await ctx.client.rpc(Subagents).models({})) as unknown as ModelsOutput
         setProviders(res.providers)
-      } catch {
-        setProviders([])
+      } catch (e) {
+        setLoadError(errorDescription(ctx.t, e) || String((e as { message?: string })?.message ?? e))
       }
     })()
   })
   const variants = createMemo(() => variantsOf(providers(), props.model))
   return (
-    <Show when={variants().length > 0} fallback={<span style={{ opacity: 0.5 }}>{ctx.t("editor.depth.none")}</span>}>
-      <ctx.ui.Menu
-        label={props.variant ?? ctx.t("editor.depth.none")}
-        trigger="button"
-        items={[
-          { label: ctx.t("editor.depth.none"), onSelect: () => props.onPick(undefined) },
-          ...variants().map((v) => ({ label: v, onSelect: () => props.onPick(v) })),
-        ]}
-      />
+    <Show when={loadError()} fallback={
+      <Show when={variants().length > 0} fallback={<span style={{ opacity: 0.5 }}>{ctx.t("editor.depth.none")}</span>}>
+        <ctx.ui.Menu
+          label={props.variant ?? ctx.t("editor.depth.none")}
+          trigger="button"
+          items={[
+            { label: ctx.t("editor.depth.none"), onSelect: () => props.onPick(undefined) },
+            ...variants().map((v) => ({ label: v, onSelect: () => props.onPick(v) })),
+          ]}
+        />
+      </Show>
+    }>
+      <span style={{ color: "#ef4444", "font-size": "12px" }}>{loadError()}</span>
     </Show>
   )
 }

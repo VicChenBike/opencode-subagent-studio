@@ -1,5 +1,5 @@
 // src/gui/migration-dialog.tsx —— V1→V2 迁移预览（goal.md §9.2 左右对照）。
-import { For } from "solid-js"
+import { For, onCleanup } from "solid-js"
 import type { Context } from "@opencode/plugin/gui"
 import type { MigrateChange } from "../rpc"
 import { changeLines } from "./migration-logic"
@@ -11,8 +11,11 @@ export function MigrationDialog(props: {
   changes: readonly MigrateChange[]
   onConfirm: () => void
   onCancel: () => void
+  /** 弹窗以任何方式关闭（含 Esc / 点外 / owner 卸载）都会触发；用于兜底 resolve，防 Promise 悬挂（第十一轮 GUI-1） */
+  onClosed?: () => void
 }) {
   const ctx = props.ctx
+  onCleanup(() => props.onClosed?.())
   return (
     <ctx.ui.Dialog
       title={ctx.t("migrate.title")}

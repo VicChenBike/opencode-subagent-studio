@@ -3,6 +3,7 @@
 import { parseDocument, Document } from "yaml"
 import { matrixFromRules, rulesFromMatrix } from "./permissions.ts"
 import { V1_ACTION_RENAME } from "./migrate-shared.ts"
+import { parseModelRef } from "./model-ref.ts"
 import type { AgentPatch, MigrateChange, PermissionRule } from "../rpc.ts"
 import { ACTIONS } from "../rpc.ts"
 
@@ -131,8 +132,47 @@ export function assertDocSound(doc: Document): void {
   }
 }
 
+const EFFECTS: readonly string[] = ["allow", "ask", "deny"]
+const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/
+
+// RPC 写入边界校验（第十一轮 F2/F3）：契约里 matrix/patch 只声明 type:"object"，
+// 内部结构必须在写盘前自查——否则畸形输入要么 TypeError 变 rpc.internal 500，
+// 要么把非法 effect/steps/color/model 原样写进代理文件。空 model/color 沿用「删除/继承」语义。
+export function assertValidPatch(patch: AgentPatch): void {
+  if (typeof patch.description !== "string") throw invalidFormatError("patch.description must be a string")
+  if (typeof patch.body !== "string") throw invalidFormatError("patch.body must be a string")
+  if (patch.model !== undefined && patch.model !== "") {
+    if (typeof patch.model !== "string" || parseModelRef(patch.model) === null) {
+      throw invalidFormatError(`invalid model ref: ${String(patch.model)}`)
+    }
+  }
+  if (patch.color !== undefined && patch.color !== "") {
+    if (typeof patch.color !== "string" || !COLOR_PATTERN.test(patch.color)) {
+      throw invalidFormatError(`invalid color: ${String(patch.color)}`)
+    }
+  }
+  if (patch.steps !== undefined) {
+    if (typeof patch.steps !== "number" || !Number.isSafeInteger(patch.steps) || patch.steps <= 0) {
+      throw invalidFormatError(`invalid steps: ${String(patch.steps)}`)
+    }
+  }
+  if (patch.hidden !== undefined && typeof patch.hidden !== "boolean") {
+    throw invalidFormatError("patch.hidden must be a boolean")
+  }
+  const matrix = patch.matrix
+  if (matrix === null || typeof matrix !== "object") throw invalidFormatError("patch.matrix must be an object")
+  if (!EFFECTS.includes(matrix.defaultEffect)) throw invalidFormatError("matrix.defaultEffect must be allow/ask/deny")
+  if (matrix.actions === null || typeof matrix.actions !== "object") throw invalidFormatError("matrix.actions must be an object")
+  for (const action of ACTIONS) {
+    if (!EFFECTS.includes(matrix.actions[action])) {
+      throw invalidFormatError(`matrix.actions.${action} must be allow/ask/deny`)
+    }
+  }
+}
+
 // 新建文件：固定字段序 description/mode/model/hidden/color/steps/permissions（goal.md §7：一律 V2、无 name）
 export function createV2Content(patch: AgentPatch): string {
+  assertValidPatch(patch)
   const doc: Document = new Document()
   doc.set("description", patch.description)
   doc.set("mode", "subagent")
@@ -149,6 +189,7 @@ export function createV2Content(patch: AgentPatch): string {
 // 既有文件打补丁：Document API 原地改，注释 / 键序 / 未知字段全保留（goal.md §9.3）
 // 正文由 patch.body 决定，原文件的 body 不参与，因此只解构 frontmatter。
 export function applyPatchToSource(raw: string, patch: AgentPatch): string {
+  assertValidPatch(patch)
   const { frontmatter } = splitFrontmatter(raw)
   const doc: Document = frontmatter === null ? new Document() : parseDocument(frontmatter)
   assertDocSound(doc)

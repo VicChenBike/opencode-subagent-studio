@@ -16,7 +16,7 @@ import {
 } from "./core/agent-store.ts"
 import { migratePreview } from "./core/frontmatter.ts"
 import { runWithDeclaredErrors } from "./core/rpc-errors.ts"
-import { createChangeDebouncer, watchAgentsDir } from "./core/watch.ts"
+import { createChangeDebouncer, watchAgentsDir, createWatcherSlot } from "./core/watch.ts"
 import {
   BUILTIN_IDS, createBuiltinTransform, overrideKeyOf, writeBuiltinOverride, isValidBuiltinModel,
 } from "./core/builtin.ts"
@@ -76,7 +76,7 @@ export default Plugin.define({
     )
 
     // ---------- 文件监听（goal.md §12.1）：去抖 300ms → reload → changed ----------
-    let projectWatcher: AgentsWatcher | null = null
+    const projectWatcher = createWatcherSlot()
 
     // 变化处理：重扫 → agent.reload() → 广播 changed。
     // 去抖与错误隔离在 core/watch.ts（可单测），这里只关心顺序。
@@ -168,8 +168,8 @@ export default Plugin.define({
       }),
 
       setDisabled: async (input, context): Promise<SetDisabledOutput | unknown> => runWithDeclaredErrors(context as unknown as ErrorContextLike, async () => {
-        const q = input as { path: string; disabled: boolean }
-        const result = await setDisabledFile({ filePath: q.path, roots: rootsForScopeOf(q.path), disabled: q.disabled })
+        const q = input as { path: string; disabled: boolean; expectedHash: string }
+        const result = await setDisabledFile({ filePath: q.path, roots: rootsForScopeOf(q.path), disabled: q.disabled, expectedHash: q.expectedHash })
         await ctx.agent.reload()
         await reg.events.emit("changed", {})
         return result
@@ -223,15 +223,16 @@ export default Plugin.define({
       // goal.md §12.1：项目级 agents/ 目录按需订阅；传空 = 停止监听
       watchProject: async (input) => {
         const q = input as { projectPath?: string }
-        projectWatcher?.close()
-        projectWatcher = null
+        let next: AgentsWatcher | null = null
         if (q.projectPath) {
           // 项目根不存在时不启动监听，也不 mkdir 伪造路径（第六轮 I4）
           const rootExists = await fs.stat(q.projectPath).then((st) => st.isDirectory()).catch(() => false)
           if (rootExists) {
-            projectWatcher = watchAgentsDir(projectAgentsDir(q.projectPath), () => changeDebouncer.trigger(), { delayMs: 0 })
+            next = watchAgentsDir(projectAgentsDir(q.projectPath), () => changeDebouncer.trigger(), { delayMs: 0 })
           }
         }
+        // 先创建再替换（第十一轮 F5）：并发调用时后到的 replace 会关闭先到的句柄，不泄漏
+        projectWatcher.replace(next)
         return {}
       },
     })
@@ -243,11 +244,11 @@ export default Plugin.define({
 
     return () => {
       userWatcher?.close()
-      projectWatcher?.close()
-      projectWatcher = null
+      projectWatcher.close()
       changeDebouncer.dispose()
-      void transformReg.dispose()
-      void reg.dispose()
+      // dispose 返回 Promise（registration.d.ts），拒绝时不能变成未处理拒绝崩进程（第十一轮 F10）
+      transformReg.dispose().catch(() => {})
+      reg.dispose().catch(() => {})
     }
   },
 })

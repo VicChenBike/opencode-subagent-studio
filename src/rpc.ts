@@ -98,7 +98,7 @@ export interface RemoveInput { path: string }
 export interface RemoveOutput { trashPath: string }
 export interface RenameInput { path: string; newId: string }
 export interface RenameOutput { path: string }
-export interface SetDisabledInput { path: string; disabled: boolean }
+export interface SetDisabledInput { path: string; disabled: boolean; expectedHash: string }
 export interface SetDisabledOutput { hash: string }
 export interface ModelsOutput { providers: ProviderSummary[] }
 export interface BuiltinOverridesOutput { general?: string; explore?: string }
@@ -174,12 +174,12 @@ export const Subagents = Rpc.define({
         additionalProperties: false,
       },
       output: { type: "object", properties: { hash: str }, required: ["hash"], additionalProperties: false },
-      errors: { invalid_path: NO_DATA, not_found: NO_DATA, conflict: NO_DATA, invalid_format: NO_DATA },
+      errors: { invalid_path: NO_DATA, not_found: NO_DATA, conflict: NO_DATA, invalid_format: NO_DATA, exists: NO_DATA },
     },
     remove: {
       input: { type: "object", properties: { path: str }, required: ["path"], additionalProperties: false },
       output: { type: "object", properties: { trashPath: str }, required: ["trashPath"], additionalProperties: false },
-      errors: { invalid_path: NO_DATA, not_found: NO_DATA },
+      errors: { invalid_path: NO_DATA, not_found: NO_DATA, exists: NO_DATA },
     },
     rename: {
       input: { type: "object", properties: { path: str, newId: str }, required: ["path", "newId"], additionalProperties: false },
@@ -187,9 +187,9 @@ export const Subagents = Rpc.define({
       errors: { invalid_path: NO_DATA, invalid_id: NO_DATA, reserved_id: NO_DATA, exists: NO_DATA, not_found: NO_DATA, invalid_format: NO_DATA },
     },
     setDisabled: {
-      input: { type: "object", properties: { path: str, disabled: bool }, required: ["path", "disabled"], additionalProperties: false },
+      input: { type: "object", properties: { path: str, disabled: bool, expectedHash: str }, required: ["path", "disabled", "expectedHash"], additionalProperties: false },
       output: { type: "object", properties: { hash: str }, required: ["hash"], additionalProperties: false },
-      errors: { invalid_path: NO_DATA, not_found: NO_DATA, migration_required: NO_DATA, invalid_format: NO_DATA },
+      errors: { invalid_path: NO_DATA, not_found: NO_DATA, conflict: NO_DATA, migration_required: NO_DATA, invalid_format: NO_DATA },
     },
     models: {
       input: { type: "object", properties: {}, additionalProperties: false },

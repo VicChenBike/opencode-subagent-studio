@@ -97,6 +97,27 @@ export interface AgentsWatcher {
 }
 
 /**
+ * 单 watcher 槽位（第十一轮 F5）：watchProject 并发调用时「先 close 再 await 再创建」
+ * 会让先创建的句柄被后一次赋值覆盖且永不 close。槽位把 close+赋值收成同步一步：
+ * 调用方先创建好 watcher 再 replace，后到的 replace 必然关闭先到的句柄。
+ */
+export function createWatcherSlot() {
+  let current: AgentsWatcher | null = null
+  return {
+    replace(next: AgentsWatcher | null): void {
+      const prev = current
+      current = next
+      prev?.close()
+    },
+    close(): void {
+      const prev = current
+      current = null
+      prev?.close()
+    },
+  }
+}
+
+/**
  * 监听一个 agents 目录（递归），任何变化都交给去抖器。
  *
  * - 目录不存在时先创建（goal.md §0.4：项目级 agents/ 可能尚未存在）

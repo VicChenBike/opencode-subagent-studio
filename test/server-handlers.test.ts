@@ -138,7 +138,7 @@ test("write method outputs all encode through the host schemas", withTempAgents(
   })
   assert.doesNotThrow(() => E.Schema.encodeUnknownSync(toEffectSchema(Subagents.methods.update.output) as never)(updated))
 
-  const toggled = await setDisabledFile({ filePath: created, roots: [dir], disabled: true })
+  const toggled = await setDisabledFile({ filePath: created, roots: [dir], disabled: true, expectedHash: updated.hash })
   assert.doesNotThrow(() => E.Schema.encodeUnknownSync(toEffectSchema(Subagents.methods.setDisabled.output) as never)(toggled))
 
   const renamed = await renameAgentFile({ filePath: created, roots: [dir], newId: "renamed-fresh" })

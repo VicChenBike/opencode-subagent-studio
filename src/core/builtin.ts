@@ -101,20 +101,35 @@ export function applyBuiltinOverrideToCache(
  * 写内置覆盖：先落 storage，成功后再改缓存（第六轮 M10）。
  * 顺序反过来会在 storage 写失败时让 transform 继续应用一个重启后即消失的覆盖。
  * handler 在本函数返回后才 reload，同步 transform 约束不受影响。
+ *
+ * 第十一轮 F8：按 storage 实例 + id 串行化。并发写同一键时，storage 完成顺序不确定，
+ * 不串行会让先发的写后落缓存，缓存与 storage 持久值漂移直到重启。
  */
+const writeChains = new WeakMap<object, Map<string, Promise<void>>>()
+
 export async function writeBuiltinOverride(
   storage: { set: (key: string, value: string) => Promise<void>; remove: (key: string) => Promise<void> },
   cache: OverrideCache,
   id: (typeof BUILTIN_IDS)[number],
   model?: string,
 ): Promise<void> {
-  const key = overrideKeyOf(id)
-  if (model === undefined || model === "") {
-    await storage.remove(key)
-  } else {
-    await storage.set(key, model)
+  let byId = writeChains.get(storage)
+  if (byId === undefined) {
+    byId = new Map()
+    writeChains.set(storage, byId)
   }
-  applyBuiltinOverrideToCache(cache, id, model)
+  const prev = byId.get(id) ?? Promise.resolve()
+  const run = prev.then(async () => {
+    const key = overrideKeyOf(id)
+    if (model === undefined || model === "") {
+      await storage.remove(key)
+    } else {
+      await storage.set(key, model)
+    }
+    applyBuiltinOverrideToCache(cache, id, model)
+  })
+  byId.set(id, run.catch(() => {}))
+  return run
 }
 
 /**

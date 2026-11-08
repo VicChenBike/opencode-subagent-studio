@@ -211,6 +211,8 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
   const ctx = usePlugin()
   // 徽标 / 开关 / 变灰三处统一从一处派生，避免各自判定走偏（goal.md §10）
   const rowState = () => agentRowState(props.agent)
+  // 开关流程进行中拒绝连点（第十一轮 GUI-3：并发 toggle 会让第二个 update 撞 conflict）
+  const [busy, setBusy] = createSignal(false)
   return (
     <div
       onClick={() => props.onOpen?.()}
@@ -259,8 +261,11 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
         hideLabel
         checked={rowState().switchChecked}
         onChange={(checked) => {
+          if (busy()) return
+          setBusy(true)
           void (async () => {
-            const result = await toggleDisabled(
+            try {
+              const result = await toggleDisabled(
               {
                 migratePreview: (input) => ctx.client.rpc(Subagents).migratePreview(input) as unknown as Promise<{ before: string; after: string; changes: MigrateChange[] }>,
                 confirmMigration: (preview) =>
@@ -273,6 +278,9 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
                         changes={preview.changes}
                         onConfirm={() => { resolve(true); dialog.close() }}
                         onCancel={() => { resolve(false); dialog.close() }}
+                        // Esc / 点外 / owner 卸载没有按钮回调：cleanup 兜底 resolve(false)，
+                        // 否则 Promise 永久悬挂、流程无声死掉（第十一轮 GUI-1，坑 13 的漏网路径）
+                        onClosed={() => resolve(false)}
                       />
                     ))
                   }),
@@ -285,7 +293,11 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
                 props.agent,
                 switchEventToDisabled(checked),
               )
-            if (result === "toggled") props.onChanged?.()
+              // 失败（如 conflict）也重拉：行 hash 可能已过期，刷新后用户才能再次切换（第十一轮 F9）
+              if (result !== "cancelled") props.onChanged?.()
+            } finally {
+              setBusy(false)
+            }
           })().catch((err) => {
             ctx.toast.show({
               title: ctx.t("common.error"),

@@ -198,17 +198,18 @@ test("setDisabledFile toggles disabled and returns new hash", async () => {
   const dir = path.join(tmp, "agents")
   fs.mkdirSync(dir, { recursive: true })
   const filePath = await createAgentFile({ dir, id: "reviewer", description: "d", body: "b\n", matrix: MATRIX })
-  const off = await setDisabledFile({ filePath, roots: [dir], disabled: true })
+  const off = await setDisabledFile({ filePath, roots: [dir], disabled: true, expectedHash: (await readAgentFile(filePath)).hash })
   const meta = (await readAgentFile(filePath)).meta as Record<string, unknown>
   assert.equal(meta.disabled, true)
-  const on = await setDisabledFile({ filePath, roots: [dir], disabled: false })
+  const on = await setDisabledFile({ filePath, roots: [dir], disabled: false, expectedHash: off.hash })
   const meta2 = (await readAgentFile(filePath)).meta as Record<string, unknown>
   assert.ok(!("disabled" in meta2)) // false = 删除字段（goal.md §10）
   assert.notEqual(off.hash, on.hash)
   // V1 文件：拒绝直接写 disabled（必须走迁移预览，goal.md §5.3）
   fs.writeFileSync(path.join(dir, "legacy.md"), "---\ndescription: d\nmode: subagent\n---\n\nb\n")
+  const legacyHash = (await readAgentFile(path.join(dir, "legacy.md"))).hash
   await assert.rejects(
-    () => setDisabledFile({ filePath: path.join(dir, "legacy.md"), roots: [dir], disabled: true }),
+    () => setDisabledFile({ filePath: path.join(dir, "legacy.md"), roots: [dir], disabled: true, expectedHash: legacyHash }),
     (e: Error & { code?: string }) => e.code === "migration_required",
   )
 })

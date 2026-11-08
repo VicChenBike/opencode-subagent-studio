@@ -26,7 +26,7 @@ export interface DisableDeps {
     expectedHash: string
     patch: AgentPatch
   }) => Promise<{ hash: string }>
-  setDisabled: (input: { path: string; disabled: boolean }) => Promise<{ hash: string }>
+  setDisabled: (input: { path: string; disabled: boolean; expectedHash: string }) => Promise<{ hash: string }>
   toast: (input: {
     title: string
     description?: string
@@ -53,23 +53,26 @@ export function switchEventToDisabled(checked: boolean): boolean {
  */
 export async function toggleDisabled(
   deps: DisableDeps,
-  agent: { id: string; path: string; format: "v1" | "v2" },
+  agent: { id: string; path: string; format: "v1" | "v2"; hash: string },
   disabled: boolean,
 ): Promise<ToggleResult> {
   try {
+    // CAS（第十一轮 F9）：V2 用列表行的 hash；V1 迁移后文件已变，必须用 update 返回的新 hash
+    let expectedHash = agent.hash
     if (agent.format === "v1") {
       const preview = await deps.migratePreview({ path: agent.path })
       const ok = await deps.confirmMigration(preview)
       if (!ok) return "cancelled"
       // 服务端对 V1 一律拒绝写 disabled，所以先整份迁移
       const current = await deps.read({ path: agent.path })
-      await deps.update({
+      const migrated = await deps.update({
         path: agent.path,
         expectedHash: current.hash,
         patch: patchFromRead(current),
       })
+      expectedHash = migrated.hash
     }
-    await deps.setDisabled({ path: agent.path, disabled })
+    await deps.setDisabled({ path: agent.path, disabled, expectedHash })
     deps.toast({
       title: deps.t(disabled ? "toast.disabled" : "toast.enabled"),
       variant: "success",

@@ -55,22 +55,22 @@ function fakeDeps(opts: {
   }
 }
 
-const v2Agent = { id: "reviewer", path: "C:/agents/reviewer.md", format: "v2" as const }
-const v1Agent = { id: "legacy", path: "C:/agents/legacy.md", format: "v1" as const }
+const v2Agent = { id: "reviewer", path: "C:/agents/reviewer.md", format: "v2" as const, hash: "row-hash-v2" }
+const v1Agent = { id: "legacy", path: "C:/agents/legacy.md", format: "v1" as const, hash: "row-hash-v1" }
 
 test("disabling a v2 agent goes straight to setDisabled", async () => {
   const { calls, deps } = fakeDeps()
   const result = await toggleDisabled(deps, v2Agent, true)
   assert.equal(result, "toggled")
   assert.equal(calls.preview.length, 0, "v2 must not show a migration preview")
-  assert.deepEqual(calls.setDisabled, [{ path: "C:/agents/reviewer.md", disabled: true }])
+  assert.deepEqual(calls.setDisabled, [{ path: "C:/agents/reviewer.md", disabled: true, expectedHash: "row-hash-v2" }])
   assert.deepEqual(calls.toast, [{ title: "toast.disabled", variant: "success" }])
 })
 
 test("enabling a v2 agent uses the enabled toast", async () => {
   const { calls, deps } = fakeDeps()
   await toggleDisabled(deps, v2Agent, false)
-  assert.deepEqual(calls.setDisabled, [{ path: "C:/agents/reviewer.md", disabled: false }])
+  assert.deepEqual(calls.setDisabled, [{ path: "C:/agents/reviewer.md", disabled: false, expectedHash: "row-hash-v2" }])
   assert.deepEqual(calls.toast, [{ title: "toast.enabled", variant: "success" }])
 })
 
@@ -84,7 +84,7 @@ test("disabling a v1 agent previews the migration first, then updates and disabl
   assert.equal(update.path, "C:/agents/legacy.md")
   assert.equal(update.expectedHash, "0123456789abcdef")
   assert.ok(update.patch.matrix, "the patch must carry a matrix from patchFromRead")
-  assert.deepEqual(calls.setDisabled, [{ path: "C:/agents/legacy.md", disabled: true }])
+  assert.deepEqual(calls.setDisabled, [{ path: "C:/agents/legacy.md", disabled: true, expectedHash: "fedcba9876543210" }])
 })
 
 test("cancelling the v1 migration preview leaves the file untouched", async () => {
@@ -114,7 +114,7 @@ test("enabling a v1 agent still migrates first because the server refuses all v1
   await toggleDisabled(deps, v1Agent, false)
   assert.equal(calls.previewDialog, 1)
   assert.equal(calls.update.length, 1)
-  assert.deepEqual(calls.setDisabled, [{ path: "C:/agents/legacy.md", disabled: false }])
+  assert.deepEqual(calls.setDisabled, [{ path: "C:/agents/legacy.md", disabled: false, expectedHash: "fedcba9876543210" }])
 })
 
 test("switchEventToDisabled maps the enable switch to the data-layer flag", () => {

@@ -5,6 +5,7 @@ import type { Context } from "@opencode/plugin/gui"
 import { Subagents } from "../rpc"
 import type { ProviderSummary, ModelsOutput } from "../rpc"
 import { filterProviders, isSelected, variantOnPick } from "./model-picker-logic"
+import { errorDescription } from "./error-copy"
 
 export function openModelPicker(
   ctx: Context,
@@ -40,7 +41,8 @@ function ModelPickerDialog(props: {
         const res = (await ctx.client.rpc(Subagents).models({})) as unknown as ModelsOutput
         setProviders(res.providers)
       } catch (e) {
-        setError(String((e as { message?: string })?.message ?? e))
+        // 已知错误码走 i18n 文案，与列表页/编辑页一致（第十一轮 GUI-4）
+        setError(errorDescription(ctx.t, e) || String((e as { message?: string })?.message ?? e))
       } finally {
         setLoaded(true)
       }

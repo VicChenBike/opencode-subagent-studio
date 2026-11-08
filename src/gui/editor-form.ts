@@ -26,9 +26,13 @@ export function splitModelRef(raw: string | undefined): { model?: string; varian
 }
 
 function parseSteps(stepsText: string | undefined): number | undefined {
-  if (stepsText === undefined || stepsText.trim() === "") return undefined
-  const n = Number(stepsText)
-  return Number.isInteger(n) && n > 0 ? n : undefined
+  const text = stepsText?.trim()
+  if (text === undefined || text === "") return undefined
+  // 只接受 plain 十进制（第十一轮 GUI-2）：Number() 会把 "0x10"/"1e3" 当合法输入，
+  // 超精度大数还会静默变成另一个值写盘。
+  if (!/^\d+$/.test(text)) return undefined
+  const n = Number(text)
+  return Number.isSafeInteger(n) && n > 0 ? n : undefined
 }
 
 /** 表单草稿 → RPC patch。model 与 variant 合并；hidden=false 视为不写。 */
