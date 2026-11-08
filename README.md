@@ -1,10 +1,10 @@
 # opencode-subagent-studio
 
-English | [简体中文](README.zh-CN.md)
+English | [简体中文](README_zh-CN.md)
 
 Manage OpenCode V2 subagents from the desktop app: a settings page to view, create, edit, disable, rename subagent markdown files and move them to trash, with live sync for the user-level agents directory and on-demand refresh for project scopes.
 
-> **Translate this README:** this document is maintained in English; the Chinese version lives in [README.zh-CN.md](README.zh-CN.md). If neither of these two languages works for you, you are welcome to translate this README with your own AI agent — the text is self-contained and machine-translation friendly.
+> **Translate this README:** this document is maintained in English; the Chinese version lives in [README_zh-CN.md](README_zh-CN.md). If neither of these two languages works for you, you are welcome to translate this README with your own AI agent — the text is self-contained and machine-translation friendly.
 
 > **UI dictionary disclaimer:** the plugin ships interface dictionaries for 11 languages (English, 简体中文, Français, Español, Português do Brasil, Русский, العربية, Deutsch, 日本語, हिन्दी, 한국어). They are AI-translated and may be ambiguous; when in doubt, the English copy is authoritative. The settings entry is named "Subagent" in every language.
 
