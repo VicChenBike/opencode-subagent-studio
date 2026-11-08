@@ -1,4 +1,4 @@
-# opencode-subagent-manager
+# opencode-subagent-studio
 
 Manage OpenCode V2 subagents from the desktop app: a settings page to view, create, edit, disable, rename and trash subagent markdown files, with live sync for user-level agents and on-demand refresh for project scopes.
 
@@ -12,9 +12,9 @@ Manage OpenCode V2 subagents from the desktop app: a settings page to view, crea
 
 > **界面词典说明：** 插件内置 11 种语言的界面词典（English、简体中文、Français、Español、Português do Brasil、Русский、العربية、Deutsch、日本語、हिन्दी、한국어）。词典由 AI 翻译，个别措辞可能有歧义；如有疑问，以英文文案为准。设置入口在各语言下统一显示为 "Subagent"。
 
-> **Status:** feature-complete for OpenCode Desktop 2.2.5 and verified compatible with 2.2.6. The upstream plugin API is experimental, so a newer desktop release may still break the plugin. This repository has not been published to a public Git host yet; the install command below uses a `<repo-url>` placeholder.
+> **Status:** feature-complete for OpenCode Desktop 2.2.5 and verified compatible with 2.2.6. The upstream plugin API is experimental, so a newer desktop release may still break the plugin. It is hosted at <https://github.com/739256AQp/opencode-subagent-studio>.
 >
-> **状态：** 面向 OpenCode Desktop 2.2.5 的功能已完成，并已实测兼容 2.2.6。上游插件 API 仍属实验性，更新的桌面端版本仍可能使插件失效。本仓库尚未发布到公开 Git 托管平台，下面的安装命令用 `<repo-url>` 占位。
+> **状态：** 面向 OpenCode Desktop 2.2.5 的功能已完成，并已实测兼容 2.2.6。上游插件 API 仍属实验性，更新的桌面端版本仍可能使插件失效。仓库地址：<https://github.com/739256AQp/opencode-subagent-studio>。
 
 ---
 
@@ -31,8 +31,6 @@ Manage OpenCode V2 subagents from the desktop app: a settings page to view, crea
 | **Built-in overrides** | Switch `general` / `explore` models at runtime through plugin storage; nothing is written to `opencode.jsonc` | 内置代理换模型走插件存储，不写配置文件 |
 | **Live sync** | `fs.watch` + 300 ms debounce + `agent.reload()`; user-level directories refresh automatically. In the current build, external changes in a project scope need the Refresh button | `fs.watch` + 300 ms 去抖 + `agent.reload()`；用户级目录自动刷新。当前构建中，项目级目录的外部改动需要点「刷新」 |
 | **i18n** | 11 interface languages (en, zh, fr, es, br, ru, ar, de, ja, hi, ko), AI-translated; the settings entry reads "Subagent" in every language | 11 种界面语言（en、zh、fr、es、br、ru、ar、de、ja、hi、ko），词典由 AI 翻译；设置入口在各语言下统一显示 "Subagent" |
-
-<!-- TODO: add screenshots of the list page and the editor page -->
 
 ## Requirements / 前置要求
 
@@ -56,11 +54,11 @@ Manage OpenCode V2 subagents from the desktop app: a settings page to view, crea
 
 ## Install / 安装
 
-1. Clone the repository into the plugins directory, then install and build. The repository URL is not published yet; replace `<repo-url>` with the real URL once it is. If you already have this folder, skip the clone and run the three commands inside it.
+1. Clone the repository into the plugins directory, then install and build. If you already have this folder, skip the clone and run the three commands inside it.
 
 ```bash
-git clone <repo-url> ~/.config/opencode/plugins/opencode-subagent-manager
-cd ~/.config/opencode/plugins/opencode-subagent-manager
+git clone https://github.com/739256AQp/opencode-subagent-studio ~/.config/opencode/plugins/opencode-subagent-studio
+cd ~/.config/opencode/plugins/opencode-subagent-studio
 npm install
 npm run build
 ```
@@ -72,20 +70,20 @@ npm run build
 ```jsonc
 {
   "plugins": [
-    "<your home>/.config/opencode/plugins/opencode-subagent-manager"
+    "<your home>/.config/opencode/plugins/opencode-subagent-studio"
   ]
 }
 ```
 
-Use your platform's path separator and escape backslashes in JSON, for example on Windows: `"C:\\Users\\<you>\\.config\\opencode\\plugins\\opencode-subagent-manager"`.
+Use your platform's path separator and escape backslashes in JSON, for example on Windows: `"C:\\Users\\<you>\\.config\\opencode\\plugins\\opencode-subagent-studio"`.
 
 3. Restart the desktop app fully (quit from the tray, then relaunch — a window reload is not enough because the server half only loads at process start). Open **Settings → Agent capability → Subagent**.
 
-1. 把仓库克隆到插件目录，然后安装并构建。仓库 URL 尚未发布，发布后请把 `<repo-url>` 换成真实地址；如果你已经拿到这个文件夹，跳过 clone，直接在文件夹里执行下面三条命令。
+1. 把仓库克隆到插件目录，然后安装并构建。如果你已经拿到这个文件夹，跳过 clone，直接在文件夹里执行下面三条命令。
 
 ```bash
-git clone <repo-url> ~/.config/opencode/plugins/opencode-subagent-manager
-cd ~/.config/opencode/plugins/opencode-subagent-manager
+git clone https://github.com/739256AQp/opencode-subagent-studio ~/.config/opencode/plugins/opencode-subagent-studio
+cd ~/.config/opencode/plugins/opencode-subagent-studio
 npm install
 npm run build
 ```
@@ -97,12 +95,12 @@ npm run build
 ```jsonc
 {
   "plugins": [
-    "<你的用户目录>/.config/opencode/plugins/opencode-subagent-manager"
+    "<你的用户目录>/.config/opencode/plugins/opencode-subagent-studio"
   ]
 }
 ```
 
-注意使用当前平台的路径分隔符，并在 JSON 中转义反斜杠。Windows 示例：`"C:\\Users\\<you>\\.config\\opencode\\plugins\\opencode-subagent-manager"`。
+注意使用当前平台的路径分隔符，并在 JSON 中转义反斜杠。Windows 示例：`"C:\\Users\\<you>\\.config\\opencode\\plugins\\opencode-subagent-studio"`。
 
 3. 完全重启桌面端（从托盘退出后重新启动；仅刷新窗口不够，因为服务端部分只在进程启动时加载）。打开 **设置 → Agent 能力 → Subagent**。
 
@@ -290,6 +288,8 @@ It makes no network requests and collects no telemetry.
 ## License / 许可
 
 MIT. See [LICENSE](LICENSE).
+
+MIT。见 [LICENSE](LICENSE)。
 
 ## Acknowledgements / 致谢
 
