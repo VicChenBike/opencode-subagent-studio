@@ -1,7 +1,15 @@
 {
   "name": "opencode-subagent-studio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Manage OpenCode V2 subagents from the OpenCode Desktop settings: view, create, edit, disable, rename and trash subagent markdown files",
+  "homepage": "https://github.com/VicChenBike/opencode-subagent-studio#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VicChenBike/opencode-subagent-studio.git"
+  },
+  "bugs": {
+    "url": "https://github.com/VicChenBike/opencode-subagent-studio/issues"
+  },
   "keywords": [
     "opencode",
     "opencode-plugin",
