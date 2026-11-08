@@ -1,6 +1,16 @@
 {
   "name": "opencode-subagent-studio",
   "version": "0.1.0",
+  "description": "Manage OpenCode V2 subagents from the OpenCode Desktop settings: view, create, edit, disable, rename and trash subagent markdown files",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "subagent",
+    "subagents",
+    "agents",
+    "desktop",
+    "plugin-manager"
+  ],
   "license": "MIT",
   "type": "module",
   "exports": {
