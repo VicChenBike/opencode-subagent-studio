@@ -152,6 +152,8 @@ Honest list of what this plugin does not do:
 - **Nested agent files are listed but cannot be created from the UI** — a file at `agents/team/reviewer.md` is shown with ID `team/reviewer` and can be edited; the New/Rename dialogs only accept flat IDs, and renaming a nested agent keeps it in its subfolder.
 - **The host plugin API is experimental** — a newer OpenCode Desktop may change it and break this plugin (built against 2.2.5, verified on 2.2.6).
 - **Built-in overrides live in plugin storage** — disabling or removing the plugin restores OpenCode's default models for `general` / `explore`.
+- **Staying in the editor after a rename keeps the old path** — if you rename an agent while the form has unsaved edits and choose to stay in the editor, a further save reports `not found` (the rename already succeeded on disk). Leave the editor and reopen the renamed agent; the unsaved edits must be redone.
+- **A persistently locked or ACL-denied agent file fails with a generic error** — transient Windows file locks are retried automatically; a persistent access-denied during a write surfaces an unknown-error toast. No data is changed (reads happen before any write).
 
 ## Troubleshooting
 
@@ -176,6 +178,8 @@ npm run watch     # rebuild the GUI on change; server changes need an app restar
 ```
 
 The build must produce exactly one file in `dist/`. Modules the desktop provides (`solid-js`, `solid-js/web`, `@opencode/plugin/gui`, `@opencode/plugin/rpc`) stay external; the build fails if anything else from these packages is bundled. The GUI bundle must contain no dynamic imports.
+
+Before opening a pull request, see [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and ground rules.
 
 ## Restore from trash
 
