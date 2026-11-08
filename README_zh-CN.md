@@ -10,6 +10,8 @@
 
 > **状态：** 功能已全部完成（基准版本 OpenCode Desktop 2.2.5），并已实测兼容 2.2.6。上游插件 API 仍属实验性，更新的桌面端版本仍可能使插件失效。仓库地址：<https://github.com/VicChenBike/opencode-subagent-studio>。
 
+> **命名说明：** npm 包与 GitHub 仓库名为 `opencode-subagent-studio`。OpenCode 应用内的插件 id 仍为 `subagent-manager`（插件 id 注册后无法改名），本地插件目录也保留原名——因此日志里的 `[subagent-manager]`、代码中的 `id: "subagent-manager"`、磁盘上的 `opencode-subagent-manager` 目录均属正常；"Studio" 这个名字用于 npm、GitHub 与 `package.json`。
+
 ---
 
 ## 功能
@@ -25,10 +27,6 @@
 | **内置模型覆盖** | 运行时通过插件存储为内置代理换模型；不写 `opencode.jsonc` |
 | **实时同步** | `fs.watch` + 300 ms 去抖 + `agent.reload()`；用户级目录自动刷新。当前构建中，项目级目录的外部改动需要点**刷新** |
 | **界面词典** | 11 种界面语言（en、zh、fr、es、br、ru、ar、de、ja、hi、ko），词典由 AI 翻译；设置入口在各语言下统一显示 "Subagent" |
-
-![Subagent 列表页](docs/screenshots/list-page.png)
-
-![新建子代理编辑页](docs/screenshots/editor-page.png)
 
 ## 前置要求
 

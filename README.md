@@ -10,6 +10,8 @@ Manage OpenCode V2 subagents from the desktop app: a settings page to view, crea
 
 > **Status:** feature-complete for OpenCode Desktop 2.2.5 and verified compatible with 2.2.6. The upstream plugin API is experimental, so a newer desktop release may still break the plugin. Source repository: <https://github.com/VicChenBike/opencode-subagent-studio>.
 
+> **Naming note:** the npm package and this repository are named `opencode-subagent-studio`. The OpenCode plugin id remains `subagent-manager` — plugin ids cannot be renamed after registration — and the local plugin directory keeps the same name. So `[subagent-manager]` in log lines, `id: "subagent-manager"` in code, and an `opencode-subagent-manager` folder on disk are all expected; the "Studio" name lives in npm, GitHub and `package.json`.
+
 ---
 
 ## Features
@@ -25,10 +27,6 @@ Manage OpenCode V2 subagents from the desktop app: a settings page to view, crea
 | **Built-in overrides** | Switch `general` / `explore` models at runtime through plugin storage; nothing is written to `opencode.jsonc` |
 | **Live sync** | `fs.watch` + 300 ms debounce + `agent.reload()`; user-level directories refresh automatically. In the current build, external changes in a project scope need the Refresh button |
 | **i18n** | 11 interface languages (en, zh, fr, es, br, ru, ar, de, ja, hi, ko), AI-translated; the settings entry reads "Subagent" in every language |
-
-![The Subagent list page](docs/screenshots/list-page.png)
-
-![The new-subagent editor](docs/screenshots/editor-page.png)
 
 ## Requirements
 
