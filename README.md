@@ -32,6 +32,10 @@ Manage OpenCode V2 subagents from the desktop app: a settings page to view, crea
 | **Live sync** | `fs.watch` + 300 ms debounce + `agent.reload()`; user-level directories refresh automatically. In the current build, external changes in a project scope need the Refresh button | `fs.watch` + 300 ms 去抖 + `agent.reload()`；用户级目录自动刷新。当前构建中，项目级目录的外部改动需要点「刷新」 |
 | **i18n** | 11 interface languages (en, zh, fr, es, br, ru, ar, de, ja, hi, ko), AI-translated; the settings entry reads "Subagent" in every language | 11 种界面语言（en、zh、fr、es、br、ru、ar、de、ja、hi、ko），词典由 AI 翻译；设置入口在各语言下统一显示 "Subagent" |
 
+![The Subagent list page](docs/screenshots/list-page.png)
+
+![The new-subagent editor](docs/screenshots/editor-page.png)
+
 ## Requirements / 前置要求
 
 - **OpenCode Desktop 2.2.5** — the version this plugin was built against. **2.2.6** has been verified compatible.
