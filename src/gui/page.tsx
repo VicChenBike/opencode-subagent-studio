@@ -1,4 +1,4 @@
-// src/gui/page.tsx —— 列表页。ZCode 视觉参考要点：组标题承载归属；行内徽标小圆角。
+// src/gui/page.tsx —— 列表页。视觉参考宿主设置页的排版要点：组标题承载归属；行内徽标小圆角。
 import { createSignal, createResource, createMemo, onCleanup, Show, Switch, Match, For } from "solid-js"
 import { usePlugin } from "@opencode/plugin/gui"
 import { Subagents } from "../rpc"

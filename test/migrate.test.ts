@@ -3,7 +3,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { migrateContent, parseAgentFile } from "../src/core/frontmatter.ts"
 
-// 结构取自用户真实 superpowers-code-reviewer.md（模型名换假名）
+// 结构参照社区常见的 superpowers 风格审查类代理文件（模型名换假名）
 const V1_REVIEWER = `---
 name: superpowers-code-reviewer
 description: Reviews completed implementation work
@@ -66,7 +66,7 @@ test("migrate: temperature/top_p/options dropped", () => {
 })
 
 test("migrate: nested permission map expands to rules with action renames", () => {
-  // 结构取自真实 superpowers-implementer.md
+  // 结构参照社区常见的 superpowers 风格实现类代理文件
   const { content } = migrateContent(
     `---
 description: d
@@ -125,7 +125,7 @@ test("migrate: v2 file is returned unchanged", () => {
   assert.deepEqual(changes, [])
 })
 
-// 真实 implementer 结构的细粒度规则必须一条不漏（结构取自用户真实文件，模型名换假名）
+// superpowers 风格实现类代理的细粒度规则必须一条不漏（结构参照社区常见文件，模型名换假名）
 test("migrate: every fine-grained nested rule survives with its action renamed", () => {
   const { content } = migrateContent(
     `---
