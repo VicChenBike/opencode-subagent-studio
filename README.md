@@ -144,7 +144,7 @@ Pinned at the bottom: `general` ("All tools") and `explore` ("Read-only"). They 
 - **Description** is required — it is what the parent model sees when choosing a subagent.
 - **Permissions** is a three-state matrix over ten actions (`read`, `glob`, `grep`, `edit`, `shell`, `webfetch`, `websearch`, `skill`, `subagent`, `question`) plus a default: **allow** = runs normally, **ask** = the user is asked every time, **deny** = refused. Fine-grained rules already in the file are preserved and keep priority (the last matching rule wins).
 - **System prompt** is the markdown body; **Max steps** writes `steps` (empty = unset); **Hidden** writes `hidden: true` — the agent stays callable, just not advertised to the model.
-- **Saving a V1 file** first opens a side-by-side migration preview; confirming converts the whole file to V2 (see "How it works").
+- **Saving a V1 file** first opens a side-by-side migration preview; confirming converts the whole file to V2 (see "How it works"). The editor already shows the migration-effective content (a legacy `prompt:` field appears as the body, `model` + `variant` as one reference), so toggling or saving a V1 agent never loses its prompt, variant, max steps or tool denials.
 - **Save conflict**: the editor records the file hash when it opens. If the file changed on disk, the save is refused and a dialog offers **Reload** or **Overwrite**. **Reload** (or dismissing the dialog with Esc / a click outside) leaves the editor and returns to the list. **Overwrite** keeps your form and first copies the current disk content to the trash folder as `.backup-<timestamp>-<name>.md`.
 
 - **名称**创建后只读；**重命名**先警告「代理 ID 就是文件名，提示词或其他代理里对它的引用会失效」，再拒绝已存在的目标 ID。
@@ -153,7 +153,7 @@ Pinned at the bottom: `general` ("All tools") and `explore` ("Read-only"). They 
 - **描述**必填——父模型挑选子代理时看到的就是它。
 - **权限**是 10 个 action（read / glob / grep / edit / shell / webfetch / websearch / skill / subagent / question）加一个默认档的三态矩阵：**允许**=正常执行，**询问**=每次问用户，**禁止**=拒绝。文件里已有的细粒度规则会被保留并保持优先（最后一条匹配的规则生效）。
 - **系统提示词**就是 Markdown 正文；**最大步数**写 `steps`（留空 = 不设）；**隐藏**写 `hidden: true`——代理仍可被调用，只是不向模型宣传。
-- **保存 V1 文件**会先弹左右对照的迁移预览；确认后整份转换为 V2（见「工作原理」）。
+- **保存 V1 文件**会先弹左右对照的迁移预览；确认后整份转换为 V2（见「工作原理」）。编辑页显示的已经是迁移后的等效内容（旧版 `prompt:` 字段显示为正文、`model` + `variant` 显示为一条引用），因此对 V1 代理点开关或保存不会丢提示词、variant、最大步数或工具禁用。
 - **保存冲突**：打开编辑页时记录文件 hash；若文件在磁盘上被外部改动，保存会被拒绝，弹窗提供**重新加载**或**强制覆盖**。**重新加载**（或按 Esc / 点弹窗外关闭）会离开编辑页返回列表。**强制覆盖**保留你的表单，并先把当前磁盘内容备份进回收站目录（`.backup-<时间戳>-<原名>.md`）。
 
 ## How it works / 工作原理
@@ -193,9 +193,9 @@ Two cooperating processes:
 
 **内置代理覆盖。** `general` 与 `explore` 是 OpenCode 的内置子代理，插件只能换它们的模型。覆盖值存在插件自己的键值存储里（`builtin-model.general` / `builtin-model.explore`），运行时经 `ctx.agent.transform` 注入（每次代理重载后重放）；不写 `opencode.jsonc`，移除插件后覆盖即消失。
 
-**Conflict detection.** Opening the editor records the file's hash. Saving sends that hash back; if the file changed on disk in the meantime the server refuses with `conflict` and the GUI offers **Reload** (leave the editor and return to the list) or **Overwrite** (keep the form). Dismissing the dialog also leaves the editor. Forcing the overwrite first copies the current file into the trash folder as `.backup-<timestamp>-<name>.md`.
+**Conflict detection.** Opening the editor records the file's hash. Saving sends that hash back; if the file changed on disk in the meantime the server refuses with `conflict` and the GUI offers **Reload** (leave the editor and return to the list) or **Overwrite** (keep the form). Dismissing the dialog also leaves the editor. Forcing the overwrite first copies the current file into the trash folder as `.backup-<timestamp>-<name>.md`. All writes are atomic (temporary file + rename in the same directory), so a crash or full disk mid-write cannot truncate an agent file. Existing files keep their original line endings (LF or CRLF), and a UTF-8 BOM is dropped on the first write.
 
-**冲突检测。** 打开编辑页时记录文件 hash；保存时回传该 hash，若磁盘文件在此期间被外部改动，服务端返回 `conflict`，GUI 提供**重新加载**（离开编辑页返回列表）或**强制覆盖**（保留表单）；关闭弹窗也会离开编辑页。强制覆盖前先把当前文件备份进回收站目录（`.backup-<时间戳>-<原名>.md`）。
+**冲突检测。** 打开编辑页时记录文件 hash；保存时回传该 hash，若磁盘文件在此期间被外部改动，服务端返回 `conflict`，GUI 提供**重新加载**（离开编辑页返回列表）或**强制覆盖**（保留表单）；关闭弹窗也会离开编辑页。强制覆盖前先把当前文件备份进回收站目录（`.backup-<时间戳>-<原名>.md`）。所有写入都是原子的（同目录临时文件 + rename），写入中途崩溃或磁盘满不会截断代理文件。已有文件写回时保留原始行尾（LF 或 CRLF），UTF-8 BOM 会在首次写入时去掉。
 
 ## Limitations / 局限性
 
@@ -211,7 +211,6 @@ Honest list of what this plugin does not do:
 - **Nested agent files are listed but cannot be created from the UI** — a file at `agents/team/reviewer.md` is shown with ID `team/reviewer` and can be edited; the New/Rename dialogs only accept flat IDs, and renaming a nested agent keeps it in its subfolder. 嵌套代理文件会显示但不能从 UI 新建——`agents/team/reviewer.md` 会以 `team/reviewer` 显示并可编辑；新建/重命名输入框只接受扁平 ID，重命名嵌套代理时文件仍留在原目录。
 - **The host plugin API is experimental** — a newer OpenCode Desktop may change it and break this plugin (built against 2.2.5, verified on 2.2.6). 宿主插件 API 是实验性的——更新的桌面端可能变化并导致本插件失效（基于 2.2.5 构建，2.2.6 已验证）。
 - **Built-in overrides live in plugin storage** — disabling or removing the plugin restores OpenCode's default models for `general` / `explore`. 内置覆盖仅存于插件存储——停用或移除插件后，`general` / `explore` 恢复 OpenCode 默认模型。
-- **Trash names have one-second granularity without de-duplication** — deleting two same-named files within the same second overwrites the earlier copy (different names are unaffected). 回收站文件名精确到秒且不去重——同一秒内删除两个同名的文件会互相覆盖（文件名不同则不受影响）。
 
 ## Troubleshooting / 排障
 
@@ -221,6 +220,7 @@ Honest list of what this plugin does not do:
 - **The list is empty.** Only files whose `mode` is exactly `subagent` are listed; `primary`, `all` and files without `mode` are excluded. Also check that you are in the expected user/project scope.
 - **External changes in a project scope do not appear.** This is a known limitation in the current build: project-level live sync is not wired. Click **Refresh**.
 - **A save reports a conflict.** The file changed on disk after you opened the editor. Choose **Reload** to discard your form and return to the list (which refetches), or **Overwrite** to keep your form; overwrite first creates a `.backup-` copy in `agents-trash/`.
+- **A save reports invalid frontmatter.** The file's YAML has a structural defect (duplicate keys, bad indentation, unclosed quote). The plugin refuses to write rather than risk corrupting it; fix the YAML in a text editor, then save again.
 - **`npm test` fails with `MODULE_NOT_FOUND` on Windows.** Use `npm test` (the script uses the glob `test/**/*.test.ts`); do not run `node --test test/` with a directory argument.
 - **`npm install` is slow or fails.** Try the official registry: `npm install --registry=https://registry.npmjs.org`.
 
@@ -230,6 +230,7 @@ Honest list of what this plugin does not do:
 - **列表是空的。** 只显示 `mode` 精确为 `subagent` 的文件；`primary`、`all`、没有 `mode` 的文件都会被排除。也请确认当前用户级/项目级作用域是否正确。
 - **项目级目录的外部改动不出现。** 这是当前构建的已知限制：项目级实时同步未接线。点**刷新**。
 - **保存时提示冲突。** 打开编辑页后文件在磁盘上被改动过。选**重新加载**放弃表单并返回列表（列表会重拉），或选**强制覆盖**保留表单；强制覆盖会先在 `agents-trash/` 生成 `.backup-` 副本。
+- **保存时提示 frontmatter 格式有误。** 文件的 YAML 有结构缺陷（重复键、坏缩进、未闭引号）。插件拒绝写入以免损坏文件；请先在文本编辑器里修复 YAML，再回来保存。
 - **Windows 上 `npm test` 报 `MODULE_NOT_FOUND`。** 用 `npm test`（脚本里是 `test/**/*.test.ts` 的 glob）；不要用目录形式 `node --test test/`。
 - **`npm install` 很慢或失败。** 试试官方 registry：`npm install --registry=https://registry.npmjs.org`。
 
@@ -254,9 +255,9 @@ Deleted agents move to the trash folder beside the agents directory:
 - User level / 用户级：`~/.config/opencode/agents-trash/`
 - Project level / 项目级：`<project>/.opencode/agents-trash/`
 
-Files are named `<yyyyMMdd-HHmmss>-<original-name>.md`. Move the file back into `agents/` to restore it. **Drop the timestamp prefix to keep the original agent ID**; keeping it changes the ID (the file name is the ID). There is no restore UI in this version, and moving a file back does not ask before overwriting an existing file — check the target name first.
+Files are named `<yyyyMMdd-HHmmss>-<original-name>.md`; when two same-named files land in the same second, a `-1`, `-2`… suffix is inserted before `.md` so neither copy overwrites the other. Move the file back into `agents/` to restore it. **Drop the timestamp prefix to keep the original agent ID**; keeping it changes the ID (the file name is the ID). There is no restore UI in this version, and moving a file back does not ask before overwriting an existing file — check the target name first.
 
-文件名形如 `<yyyyMMdd-HHmmss>-<原名>.md`。把它移回 `agents/` 即可恢复。**建议去掉时间戳前缀以保持原代理 ID**；保留前缀会改变 ID（文件名就是 ID）。本版本没有恢复界面；手动移回时不会询问是否覆盖同名文件，请先确认目标文件名。
+文件名形如 `<yyyyMMdd-HHmmss>-<原名>.md`；同一秒内出现两个同名文件时，会在 `.md` 前插入 `-1`、`-2`… 后缀，两份都不会互相覆盖。把它移回 `agents/` 即可恢复。**建议去掉时间戳前缀以保持原代理 ID**；保留前缀会改变 ID（文件名就是 ID）。本版本没有恢复界面；手动移回时不会询问是否覆盖同名文件，请先确认目标文件名。
 
 ## Uninstall / 卸载
 
