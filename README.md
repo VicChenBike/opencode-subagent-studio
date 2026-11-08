@@ -12,9 +12,9 @@ Manage OpenCode V2 subagents from the desktop app: a settings page to view, crea
 
 > **界面词典说明：** 插件内置 11 种语言的界面词典（English、简体中文、Français、Español、Português do Brasil、Русский、العربية、Deutsch、日本語、हिन्दी、한국어）。词典由 AI 翻译，个别措辞可能有歧义；如有疑问，以英文文案为准。设置入口在各语言下统一显示为 "Subagent"。
 
-> **Status:** feature-complete for OpenCode Desktop 2.2.5 and verified compatible with 2.2.6. The upstream plugin API is experimental, so a newer desktop release may still break the plugin. It is hosted at <https://github.com/739256AQp/opencode-subagent-studio>.
+> **Status:** feature-complete for OpenCode Desktop 2.2.5 and verified compatible with 2.2.6. The upstream plugin API is experimental, so a newer desktop release may still break the plugin. It is hosted at <https://github.com/VicChenBike/opencode-subagent-studio>.
 >
-> **状态：** 面向 OpenCode Desktop 2.2.5 的功能已完成，并已实测兼容 2.2.6。上游插件 API 仍属实验性，更新的桌面端版本仍可能使插件失效。仓库地址：<https://github.com/739256AQp/opencode-subagent-studio>。
+> **状态：** 面向 OpenCode Desktop 2.2.5 的功能已完成，并已实测兼容 2.2.6。上游插件 API 仍属实验性，更新的桌面端版本仍可能使插件失效。仓库地址：<https://github.com/VicChenBike/opencode-subagent-studio>。
 
 ---
 
@@ -61,7 +61,7 @@ Manage OpenCode V2 subagents from the desktop app: a settings page to view, crea
 1. Clone the repository into the plugins directory, then install and build. If you already have this folder, skip the clone and run the three commands inside it.
 
 ```bash
-git clone https://github.com/739256AQp/opencode-subagent-studio ~/.config/opencode/plugins/opencode-subagent-studio
+git clone https://github.com/VicChenBike/opencode-subagent-studio ~/.config/opencode/plugins/opencode-subagent-studio
 cd ~/.config/opencode/plugins/opencode-subagent-studio
 npm install
 npm run build
@@ -86,7 +86,7 @@ Use your platform's path separator and escape backslashes in JSON, for example o
 1. 把仓库克隆到插件目录，然后安装并构建。如果你已经拿到这个文件夹，跳过 clone，直接在文件夹里执行下面三条命令。
 
 ```bash
-git clone https://github.com/739256AQp/opencode-subagent-studio ~/.config/opencode/plugins/opencode-subagent-studio
+git clone https://github.com/VicChenBike/opencode-subagent-studio ~/.config/opencode/plugins/opencode-subagent-studio
 cd ~/.config/opencode/plugins/opencode-subagent-studio
 npm install
 npm run build
