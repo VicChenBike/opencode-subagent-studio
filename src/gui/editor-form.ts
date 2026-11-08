@@ -2,6 +2,7 @@
 // GUI 组件负责渲染与事件，判定逻辑都放这里，避免把校验埋进 JSX。
 import { isValidAgentId, isReservedId } from "../core/ids.ts"
 import { matrixFromRules } from "../core/permissions.ts"
+import { parseModelRef } from "../core/model-ref.ts"
 import type { AgentPatch, PermissionMatrix, PermissionRule, ReadOutput } from "../rpc"
 
 export interface EditorDraft {
@@ -99,6 +100,10 @@ export function validateEditor(input: ValidateInput): ValidateResult {
 /**
  * 从 read 结果构造「内容不变」的 patch。
  * P2-T4 / P3 的 V1 开关迁移路径复用：先读出当前内容，再原样 patch 回去触发整份迁移。
+ *
+ * 第十二轮 G-12-8：非法 color / model 不原样回写。服务端会对 patch 做形状校验并以
+ * invalid_format 拒绝整次写入——那会让 V1 文件连「停用」都做不到。这里把它们剔除，
+ * patch 不带该键时服务端删除文件里的对应字段，与编辑页首次保存的净化语义一致。
  */
 export function patchFromRead(res: ReadOutput): AgentPatch {
   const meta = res.meta as Record<string, unknown>
@@ -112,8 +117,12 @@ export function patchFromRead(res: ReadOutput): AgentPatch {
     body: res.body,
     matrix: matrixFromRules(rules, v1Permission),
   }
-  if (typeof meta.model === "string") patch.model = meta.model
-  if (typeof meta.color === "string") patch.color = meta.color
+  const model = sanitizeLoadedModelRef(meta, res.format)
+  if (model.model !== undefined) {
+    patch.model = model.variant ? `${model.model}#${model.variant}` : model.model
+  }
+  const color = sanitizeLoadedColor(meta.color)
+  if (color !== undefined) patch.color = color
   if (meta.hidden === true) patch.hidden = true
   if (typeof meta.steps === "number") patch.steps = meta.steps
   return patch
@@ -212,4 +221,80 @@ export function modelRefFromRead(
     ? meta.variant
     : undefined
   return { model: raw, variant }
+}
+
+/**
+ * 合法的代理颜色：`#rrggbb`（与写入侧校验同一形状）。
+ * 编辑页的调色板只提供 8 个色值，但用户手写文件里可能出现 `red` / `#f00`，
+ * 服务端会以 invalid_format 拒绝整次保存。
+ */
+export function isValidColor(value: unknown): value is string {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
+}
+
+/**
+ * read 装载时的颜色净化（第十二轮 G-12-8）。
+ * 非法值一律当作「未设置」：UI 显示继承默认，首次保存时 patch 不带 color，
+ * 服务端 applyPatchToSource 对空 color 执行 doc.delete("color")，即把非法键从文件移除。
+ */
+export function sanitizeLoadedColor(raw: unknown): string | undefined {
+  return isValidColor(raw) ? raw : undefined
+}
+
+/**
+ * read 装载时的模型引用净化（第十二轮 G-12-8）。
+ *
+ * 与服务端 parseModelRef 对齐（R-12-1 回退后为宿主首斜杠语义）：缺 "/"、多个 "#"、
+ * 空 variant 等是坏值；modelID 可含 "/"（models.dev 目录 id 如 openrouter/anthropic/...），
+ * 是宿主合法引用，不得净化。
+ * 坏值文件旧实现会让编辑页正常打开并显示该模型，用户点保存才被 invalid_format 拒绝，
+ * 而错误文案是底层的 schema 描述，用户无从修正。
+ * 现在把非法引用整体视为「未设置」（UI 显示继承默认），首次保存时 patch 不带 model，
+ * 服务端随之删除该非法键——与服务端删键语义一致，且不会写出半截引用。
+ */
+export function sanitizeLoadedModelRef(
+  meta: Record<string, unknown>,
+  format: "v1" | "v2",
+): { model?: string; variant?: string } {
+  const ref = modelRefFromRead(meta, format)
+  if (ref.model === undefined) return { model: undefined, variant: undefined }
+  const full = ref.variant ? `${ref.model}#${ref.variant}` : ref.model
+  return parseModelRef(full) === null ? { model: undefined, variant: undefined } : ref
+}
+
+/** 编辑页表单的可比较值集合（用于「用户是否改过」的判定）。 */
+export interface EditorFormValues {
+  description: string
+  body: string
+  model?: string
+  variant?: string
+  color?: string
+  hidden: boolean
+  stepsText?: string
+  matrix: PermissionMatrix
+}
+
+/**
+ * 表单是否与装载时的基线完全一致（第十二轮 G-12-9）。
+ *
+ * 重命名成功后编辑页会被关闭，此时若表单有未保存修改就会无声丢弃；
+ * cancel() 有二次确认，两条路径必须一致，因此需要「是否 dirty」的判定。
+ * steps 按数值语义比较：`" 8 "` 与 `"8"` 是同一个值，不算修改。
+ */
+export function formValuesEqual(a: EditorFormValues, b: EditorFormValues): boolean {
+  if (a.description !== b.description) return false
+  if (a.body !== b.body) return false
+  if ((a.model ?? "") !== (b.model ?? "")) return false
+  if ((a.variant ?? "") !== (b.variant ?? "")) return false
+  if ((a.color ?? "") !== (b.color ?? "")) return false
+  if (a.hidden !== b.hidden) return false
+  if ((parseSteps(a.stepsText) ?? null) !== (parseSteps(b.stepsText) ?? null)) return false
+  if (a.matrix.defaultEffect !== b.matrix.defaultEffect) return false
+  const left = a.matrix.actions as Record<string, string | undefined>
+  const right = b.matrix.actions as Record<string, string | undefined>
+  const actions = new Set([...Object.keys(left), ...Object.keys(right)])
+  for (const action of actions) {
+    if (left[action] !== right[action]) return false
+  }
+  return true
 }

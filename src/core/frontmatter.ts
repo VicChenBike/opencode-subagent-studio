@@ -1,7 +1,7 @@
 // src/core/frontmatter.ts —— frontmatter 拆分 / V1·V2 判别 / 解析 / 序列化 / V1→V2 迁移
 // 序列化见本文件「序列化」段；V1→V2 迁移在 P2-T3 追加。
 import { parseDocument, Document } from "yaml"
-import { matrixFromRules, rulesFromMatrix } from "./permissions.ts"
+import { matrixFromRules, rulesFromMatrix, rulesFromPermissionMap } from "./permissions.ts"
 import { V1_ACTION_RENAME } from "./migrate-shared.ts"
 import { parseModelRef } from "./model-ref.ts"
 import type { AgentPatch, MigrateChange, PermissionRule } from "../rpc.ts"
@@ -70,6 +70,18 @@ function normalizeV1Keys(meta: Record<string, unknown>): void {
 }
 
 // ---------- 序列化 ----------
+
+/**
+ * 把映射形态的 `permissions` 就地展开成规则数组（第十二轮 S-12-10）。
+ *
+ * 官方 schema 只接受数组，宿主对映射形态直接忽略；但读视图若原样返回映射，
+ * GUI 的矩阵推导会退化成「全 allow」，保存时就把用户手写的效果整体替换掉。
+ * 读视图统一成规则数组，矩阵与既有规则两条通道才能看到同一份效果。
+ */
+export function normalizePermissionMapping(meta: Record<string, unknown>): void {
+  const value = meta["permissions"]
+  if (isPlainMapping(value)) meta["permissions"] = rulesFromPermissionMap(value)
+}
 
 function isPlainMapping(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -217,11 +229,16 @@ export function applyPatchToSource(raw: string, patch: AgentPatch): string {
 
 // 从 Document 里读出既有 permissions 规则，供 rulesFromMatrix 保留细粒度项。
 // 注意：doc.get(key, true) 对序列节点不一定返回普通 JS 数组，这里统一走 toJS() 取纯值。
-// 非数组（含 V1 的 permission 映射）视为无 V2 规则。
+//
+// 第十二轮 S-12-10：映射形态（用户手写的 `permissions: { read: ask }`）也接受。
+// 官方 schema 数组是唯一合法形态、宿主会忽略映射形态，但保存时整体替换成矩阵规则
+// 会让这些效果被静默丢弃——这里复用 V1 permission→规则的展开逻辑把它们保留成既有规则
+// （顶层 `"*"` 展开成默认档规则，与 R7-14 语义一致）。
 function extractRules(doc: Document): PermissionRule[] {
   const js = doc.toJS()
   if (!isPlainMapping(js)) return []
   const value = js["permissions"]
+  if (isPlainMapping(value)) return rulesFromPermissionMap(value)
   if (!Array.isArray(value)) return []
   return value
     .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
@@ -287,8 +304,16 @@ export function migrateContent(raw: string): { content: string; changes: Migrate
   const variant = meta["variant"]
   if (typeof model === "string" && model.length > 0) {
     if (typeof variant === "string" && variant.length > 0) {
-      doc.set("model", `${model}#${variant}`)
-      changes.push({ field: "model", action: "merge", to: `${model}#${variant}` })
+      const merged = `${model}#${variant}`
+      // 第十二轮 S-12-9：合并结果必须先过 parseModelRef。`model: "a/b#v"` + `variant: "x"`
+      // 会拼出 "a/b#v#x"（非法形态），旧实现直接写盘——宿主静默不生效。
+      // 非法时保持 model 原值、删掉 variant 键，并记一条 delete 说明 variant 无法并入。
+      if (parseModelRef(merged) !== null) {
+        doc.set("model", merged)
+        changes.push({ field: "model", action: "merge", to: merged })
+      } else {
+        changes.push({ field: "variant", action: "delete" })
+      }
     }
   }
   if (doc.has("variant")) doc.delete("variant")

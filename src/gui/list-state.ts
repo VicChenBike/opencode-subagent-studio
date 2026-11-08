@@ -12,6 +12,11 @@ export interface ListViewInput {
   error: unknown
   agents: readonly AgentSummary[]
   query: string
+  /**
+   * 是否已经有上一次成功加载的数据（resource 已 resolve 过）。
+   * 省略视为 false，保持第十一轮「首次加载显示 Loader」的行为。
+   */
+  hasData?: boolean
 }
 
 export type ListViewState =
@@ -22,12 +27,11 @@ export type ListViewState =
   | { kind: "rows"; agents: AgentSummary[] }
 
 
-/** 错误优先于 loading：错误态必须能覆盖仍在 loading 的资源。 */
-export function listViewState(input: ListViewInput): ListViewState {
-  if (input.error !== undefined && input.error !== null) {
-    return { kind: "error", message: errorMessage(input.error) }
-  }
-  if (input.loading) return { kind: "loading" }
+/**
+ * 列表内容的推导（与 loading / error 无关的部分）。
+ * 搜索词与行数据都来自当前作用域，因此「已有数据时的刷新」直接复用它。
+ */
+function contentState(input: ListViewInput): ListViewState {
   const query = input.query.trim()
   if (input.agents.length === 0) {
     return query ? { kind: "emptySearch", query } : { kind: "empty" }
@@ -36,17 +40,47 @@ export function listViewState(input: ListViewInput): ListViewState {
 }
 
 /**
+ * 列表视图状态。
+ *
+ * 优先级（第十二轮 G-12-4 / G-12-5）：
+ * 1. 首次加载（还没有任何已加载数据）：一律 loading。
+ *    切作用域时 error 仍是上一个作用域的旧值，不能盖住新来源的加载过程。
+ * 2. 刷新中但已有数据：保持现有内容（行 / 空态 / 搜索空态），不闪 Loader，
+ *    也不让旧 error 把整页替换成错误视图——否则每次写操作后列表都会整体消失一次。
+ * 3. 加载结束后 error 优先（goal.md §12.1：500 时不能整页空白）。
+ * 4. 其余按内容落到 empty / emptySearch / rows。
+ */
+export function listViewState(input: ListViewInput): ListViewState {
+  const hasData = input.hasData === true
+  if (input.loading) {
+    return hasData ? contentState(input) : { kind: "loading" }
+  }
+  if (input.error !== undefined && input.error !== null) {
+    return { kind: "error", message: errorMessage(input.error) }
+  }
+  return contentState(input)
+}
+
+/**
  * 收到 changed 事件时的处置（goal.md §12.1 末句）。
  *
  * 编辑页打开时一律只提示「磁盘已更新」，不重拉也不覆盖表单：
  * 用户正在编辑的内容一旦被磁盘版本替换，未保存的修改就无声丢失了。
  * 这里不区分 formDirty——编辑页的输入永远算作「可能未保存」。
+ *
+ * 第十二轮 G-12-3：服务端每次写操作都是「先 emit changed 再返回 RPC 结果」，
+ * 所以编辑页自己的保存 / 重命名会先收到一条 changed。这条事件不是「磁盘被别人改了」，
+ * 提示「磁盘已更新」会误导用户。编辑页在发起写 RPC 前把 selfWrite 置位、响应后复位，
+ * 期间到达的 changed 直接忽略（编辑页里已由自己的 toast 反馈结果）。
+ * selfWrite 只在编辑页打开时有意义：列表页自己的写操作本来就该重拉。
  */
 export function changedAction(input: {
   editorOpen: boolean
   formDirty: boolean
-}): "refetch" | "notify" {
-  return input.editorOpen ? "notify" : "refetch"
+  selfWrite?: boolean
+}): "refetch" | "notify" | "ignore" {
+  if (!input.editorOpen) return "refetch"
+  return input.selfWrite === true ? "ignore" : "notify"
 }
 
 export interface AgentRowState {

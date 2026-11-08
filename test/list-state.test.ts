@@ -17,15 +17,17 @@ const agent = (id: string): AgentSummary => ({
   mtime: 1,
 })
 
-test("error wins over everything else", () => {
+test("error wins over everything else once loading has finished", () => {
   const state = listViewState({ loading: false, error: new Error("boom"), agents: [], query: "" })
   assert.equal(state.kind, "error")
   assert.equal(state.kind === "error" && state.message, "boom")
 })
 
-test("error while still loading is still an error", () => {
+// 第十二轮 G-12-5：切作用域时 error 仍是上一个作用域的旧值，
+// 加载新来源期间不能显示旧错误视图（旧断言「error while still loading is still an error」已作废）。
+test("a stale error yields to loading while the new source is still being fetched", () => {
   const state = listViewState({ loading: true, error: new Error("boom"), agents: [], query: "" })
-  assert.equal(state.kind, "error")
+  assert.equal(state.kind, "loading")
 })
 
 test("loading without error is the loading state", () => {

@@ -164,7 +164,9 @@ export const Subagents = Rpc.define({
         additionalProperties: false,
       },
       output: { type: "object", properties: { path: str }, required: ["path"], additionalProperties: false },
-      errors: { invalid_path: NO_DATA, invalid_id: NO_DATA, reserved_id: NO_DATA, exists: NO_DATA },
+      // S-12-1：create 走 createV2Content → assertValidPatch，畸形 matrix/color/steps/model
+      // 会抛 invalid_format。缺这条声明时宿主按未声明错误名处理，直接 500。
+      errors: { invalid_path: NO_DATA, invalid_id: NO_DATA, reserved_id: NO_DATA, exists: NO_DATA, invalid_format: NO_DATA },
     },
     update: {
       input: {

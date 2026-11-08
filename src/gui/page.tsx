@@ -8,6 +8,7 @@ import { errorDescription } from "./error-copy"
 import { EditorPage, type EditorTarget } from "./editor"
 import { trashAgent } from "./trash-flow"
 import { toggleDisabled, switchEventToDisabled } from "./disable-flow"
+import { beginInFlight, endInFlight, isInFlight, onInFlightChange } from "./inflight"
 import { MigrationDialog } from "./migration-dialog"
 import { openModelPicker } from "./model-picker"
 import type { MigrateChange, ReadOutput } from "../rpc"
@@ -15,6 +16,12 @@ import type { MigrateChange, ReadOutput } from "../rpc"
 type Scope =
   | { kind: "user" }
   | { kind: "project"; projectPath: string; projectName: string }
+
+/** resource 的结果自带来源键，用于判断当前展示的数据是否属于当前作用域（G-12-4）。 */
+interface ListResult {
+  scopeKey: string
+  output: ListOutput
+}
 
 interface ProjectLike {
   id: string
@@ -46,28 +53,60 @@ export function Page(_props: { target?: string }) {
   })
 
   // source 传 scope 信号：切换作用域时自动重新拉取（goal.md §16-3 要求切项目能看到该项目内容）
-  const [data, { refetch }] = createResource<ListOutput, Scope>(scope, async (s) => {
+  // 结果里带上来源键：切作用域时旧行不能继续显示，而并发请求的返回顺序无法保证，
+  // 只有让「数据自己记住来源」才能无竞态地判断当前展示的是不是本作用域的内容。
+  const scopeKeyOf = (s: Scope) => (s.kind === "user" ? "user" : `project:${s.projectPath}`)
+  const [data, { refetch }] = createResource<ListResult, Scope>(scope, async (s) => {
     const res =
       s.kind === "user"
         ? await ctx.client.rpc(Subagents).list({ scope: "user" })
         : await ctx.client.rpc(Subagents).list({ scope: "project", projectPath: s.projectPath })
-    return res as unknown as ListOutput
+    return { scopeKey: scopeKeyOf(s), output: res as unknown as ListOutput }
+  })
+
+  /**
+   * 已加载到的列表数据（第十二轮 G-12-4）。
+   *
+   * 直接调 `data()` 在 errored 状态会抛错（Solid 的 resource read 语义），
+   * 所以这里按 state 守卫：只有确实拿到过结果时才返回内容。
+   * refetch 期间 value 仍是上一次成功结果，正是我们要继续显示的行；
+   * 但切换作用域后旧数据不属于当前来源，必须视为「尚未加载」。
+   */
+  const listData = createMemo<ListOutput | undefined>(() => {
+    if (data.state === "unresolved" || data.state === "errored") return undefined
+    try {
+      const value = data() as ListResult | undefined
+      if (!value || value.scopeKey !== scopeKeyOf(scope())) return undefined
+      return value.output
+    } catch {
+      return undefined
+    }
   })
 
   const filtered = createMemo<AgentSummary[]>(() => {
     const q = query().trim().toLowerCase()
-    const agents = data()?.agents ?? []
+    const agents = listData()?.agents ?? []
     if (!q) return agents
     return agents.filter(
       (a) => a.id.toLowerCase().includes(q) || a.description.toLowerCase().includes(q),
     )
   })
 
-  // 视图状态：错误优先（避免 500 时整页空白），其次 loading / 空态 / 搜索空态 / 行列表
+  // 编辑页自致写操作窗口（第十二轮 G-12-3）：服务端先 emit changed 再返回 RPC 结果，
+  // 编辑页自己的保存 / 重命名会先收到一条 changed；把它当成「磁盘被别人改了」是语义误导。
+  // 编辑页在发起写 RPC 前置位、响应后复位，期间到达的 changed 直接忽略。
+  const [editorSelfWrite, setEditorSelfWrite] = createSignal(false)
+
+  // 视图状态：首次加载显示 Loader；已有数据时刷新保持现有内容，不闪 Loader、不显示旧错误。
   // goal.md §12.1：changed → 列表重拉；编辑页打开时不覆盖表单，只提示磁盘已更新
   onCleanup(
     ctx.client.rpc(Subagents).events.on("changed", () => {
-      const action = changedAction({ editorOpen: editorTarget() !== null, formDirty: true })
+      const action = changedAction({
+        editorOpen: editorTarget() !== null,
+        formDirty: true,
+        selfWrite: editorSelfWrite(),
+      })
+      if (action === "ignore") return
       if (action === "notify") {
         ctx.toast.show({ title: ctx.t("list.diskUpdated") })
         return
@@ -82,6 +121,7 @@ export function Page(_props: { target?: string }) {
       error: data.error,
       agents: filtered(),
       query: query(),
+      hasData: listData() !== undefined,
     }),
   )
 
@@ -115,7 +155,8 @@ export function Page(_props: { target?: string }) {
       fallback={
         <EditorPage
           target={editorTarget()!}
-          existingIds={() => (data()?.agents ?? []).map((a) => a.id)}
+          existingIds={() => (listData()?.agents ?? []).map((a) => a.id)}
+          onSelfWriteChange={setEditorSelfWrite}
           onBack={() => setEditorTarget(null)}
           onSaved={() => { setEditorTarget(null); void refetch() }}
           onDelete={() => {
@@ -125,7 +166,13 @@ export function Page(_props: { target?: string }) {
               const result = await trashAgent(
                 {
                   confirm: (input) => ctx.dialogs.confirm(input),
-                  remove: (input) => ctx.client.rpc(Subagents).remove(input) as unknown as Promise<{ trashPath: string }>,
+                  // G-12-3：删除同样是编辑页自致的写操作，服务端会先 emit changed。
+                  // 只包住 remove RPC（确认弹窗期间的外部修改仍要提示）。
+                  remove: (input) => {
+                    setEditorSelfWrite(true)
+                    return (ctx.client.rpc(Subagents).remove(input) as unknown as Promise<{ trashPath: string }>)
+                      .finally(() => setEditorSelfWrite(false))
+                  },
                   toast: (input) => ctx.toast.show(input),
                   t: ctx.t,
                 },
@@ -199,7 +246,7 @@ export function Page(_props: { target?: string }) {
       <Show when={view().kind !== "error" && view().kind !== "loading"}>
         <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
           <div style={{ "font-weight": 600, opacity: 0.8 }}>{ctx.t("list.builtin")}</div>
-          <For each={data()?.builtins ?? []}>{(b) => <BuiltinRow builtin={b} onChanged={() => void refetch()} />}</For>
+          <For each={listData()?.builtins ?? []}>{(b) => <BuiltinRow builtin={b} onChanged={() => void refetch()} />}</For>
         </div>
       </Show>
     </div>
@@ -211,8 +258,20 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
   const ctx = usePlugin()
   // 徽标 / 开关 / 变灰三处统一从一处派生，避免各自判定走偏（goal.md §10）
   const rowState = () => agentRowState(props.agent)
-  // 开关流程进行中拒绝连点（第十一轮 GUI-3：并发 toggle 会让第二个 update 撞 conflict）
-  const [busy, setBusy] = createSignal(false)
+  // 开关流程进行中拒绝连点（第十一轮 GUI-3：并发 toggle 会让第二个 update 撞 conflict）。
+  // 第十二轮 G-12-6：守卫改按 path 记在模块级——列表用 <For> 按引用 keyed，
+  // refetch 会重挂载行组件，组件实例信号会归零；V1 迁移流程中途再点开关就会并发第二个 setDisabled。
+  // 模块级登记本身不是响应式源，用本地 tick 跟随 onInFlightChange 重算。
+  const [tick, setTick] = createSignal(0)
+  onCleanup(
+    onInFlightChange(() => {
+      setTick((n) => n + 1)
+    }),
+  )
+  const busy = () => {
+    tick()
+    return isInFlight(props.agent.path)
+  }
   return (
     <div
       onClick={() => props.onOpen?.()}
@@ -260,9 +319,10 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
         label={ctx.t("list.enabled")}
         hideLabel
         checked={rowState().switchChecked}
+        // 流程进行中开关不可再翻转（与 onChange 里的 beginInFlight 守卫双保险）
+        disabled={busy()}
         onChange={(checked) => {
-          if (busy()) return
-          setBusy(true)
+          if (!beginInFlight(props.agent.path)) return
           void (async () => {
             try {
               const result = await toggleDisabled(
@@ -296,7 +356,8 @@ function AgentRow(props: { agent: AgentSummary; onOpen?: () => void; onDeleted?:
               // 失败（如 conflict）也重拉：行 hash 可能已过期，刷新后用户才能再次切换（第十一轮 F9）
               if (result !== "cancelled") props.onChanged?.()
             } finally {
-              setBusy(false)
+              // 守卫按 path 记在模块级，流程结束（成功 / 失败 / 取消）一律释放
+              endInFlight(props.agent.path)
             }
           })().catch((err) => {
             ctx.toast.show({

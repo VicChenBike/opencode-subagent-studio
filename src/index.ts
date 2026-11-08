@@ -31,14 +31,29 @@ function defaultMatrixActions(): PermissionMatrix["actions"] {
 // update / setDisabled / rename / remove 只拿到绝对路径，无法反推 scope：
 // write 白名单 = 用户级根 + 该路径所在 <项目根>/.opencode/agents
 // marker 查找大小写不敏感：win32 下盘符/目录大小写不同也要能反推出项目根（第七轮 R7-13）。
-function rootsForScopeOf(filePath: string): string[] {
+//
+// 第十二轮 S-12-4：索引必须在**原串**上求。旧实现用 `resolved.toLowerCase().lastIndexOf(...)`
+// 的索引去切原串——toLowerCase 会改变长度（土耳其 İ → "i̇" 两码元），≥3 个这类字符时
+// 索引错位，项目根算错。这里用大小写不敏感正则直接在原串上取 match.index。
+// 分隔符只用本机 path.sep：POSIX 下反斜杠是合法文件名字符，不能当分隔符匹配。
+const escapedSep = path.sep.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+const AGENTS_MARKER = new RegExp(`${escapedSep}\\.opencode${escapedSep}agents(?=${escapedSep}|$)`, "gi")
+
+/** 从任意文件路径反推 <项目根>；没有 `.opencode/agents` 形状时返回 null。 */
+export function projectRootOf(filePath: string): string | null {
   const resolved = path.resolve(filePath)
-  const marker = `${path.sep}.opencode${path.sep}agents`
-  const idx = resolved.toLowerCase().lastIndexOf(marker.toLowerCase())
-  if (idx !== -1) {
-    return [userAgentsDir(), projectAgentsDir(resolved.slice(0, idx))]
-  }
-  return [userAgentsDir()]
+  let idx = -1
+  for (const match of resolved.matchAll(AGENTS_MARKER)) idx = match.index ?? -1
+  if (idx === -1) return null
+  const root = resolved.slice(0, idx)
+  if (root === "") return path.sep
+  // 根就是盘符本身（`C:\.opencode\agents\x.md`）时补上分隔符，避免 "C:" 这种相对形态
+  return root.endsWith(":") ? root + path.sep : root
+}
+
+function rootsForScopeOf(filePath: string): string[] {
+  const root = projectRootOf(filePath)
+  return root === null ? [userAgentsDir()] : [userAgentsDir(), projectAgentsDir(root)]
 }
 
 export default Plugin.define({

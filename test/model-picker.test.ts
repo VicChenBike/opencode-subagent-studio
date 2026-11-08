@@ -65,6 +65,7 @@ test("variantsOf returns an empty list for an unknown or malformed model ref", (
   assert.deepEqual(variantsOf(PROVIDERS, undefined), [])
 })
 
+// R-12-1：宿主按第一个 "/" 切分，modelID 可含 "/"（models.dev 目录 id），嵌套 id 可选。
 test("variantsOf splits on the first slash so nested model ids work", () => {
   const nested: ProviderSummary[] = [
     { id: "acme", name: "Acme", models: [{ id: "org/mini", name: "Org Mini", variants: ["high"] }] },

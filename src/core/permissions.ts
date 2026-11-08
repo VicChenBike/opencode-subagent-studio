@@ -32,6 +32,18 @@ function flattenV1Permission(
   return out
 }
 
+/**
+ * 映射形态的权限声明 → 规则数组（第十二轮 S-12-10）。
+ *
+ * 官方 schema 只接受数组，但用户手写的 V2 文件里出现 `permissions: { read: ask }`
+ * 并不罕见；宿主会忽略它，而旧实现保存时会用矩阵规则整体覆盖、静默丢掉这些效果。
+ * 展开规则与 V1 permission 完全一致：顶层 `"*"` 天然落成 `{action:"*",resource:"*"}`
+ * 默认档规则（与 R7-14 语义一致），嵌套映射展开为细粒度规则。
+ */
+export function rulesFromPermissionMap(map: Record<string, unknown>): PermissionRule[] {
+  return flattenV1Permission(map)
+}
+
 function lastStarEffect(rules: readonly PermissionRule[], action: string, fallback: Effect): Effect {
   let effect = fallback
   for (const r of rules) {

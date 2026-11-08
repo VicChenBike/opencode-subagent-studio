@@ -8,7 +8,7 @@ import os from "node:os"
 import { parseDocument, Document } from "yaml"
 import {
   parseAgentFile, createV2Content, applyPatchToSource, migrateContent, splitFrontmatter, migratePreview,
-  assertDocSound, detectEol, applyEol,
+  assertDocSound, detectEol, applyEol, normalizePermissionMapping,
 } from "./frontmatter.ts"
 import { matrixFromRules } from "./permissions.ts"
 import { isValidAgentId, isReservedId } from "./ids.ts"
@@ -79,7 +79,9 @@ export function assertAllowedPath(
     const r = pathKey(root)
     return key === r || key.startsWith(r + path.sep)
   })
-  const projectShaped = /(^|[\\/])\.opencode[\\/]agents([\\/]|$)/.test(resolved)
+  // i 标志与 R7-13 的写路径对齐（第十二轮 S-12-2）：win32 混合大小写 `.OpenCode\Agents`
+  // 必须和写白名单一样放行，否则同一份文件写得到、读不到（read/migratePreview 误拒 invalid_path）。
+  const projectShaped = /(^|[\\/])\.opencode[\\/]agents([\\/]|$)/i.test(resolved)
   if (!ok && !(mode === "read" && projectShaped)) {
     const err = new Error(`path outside allowed roots: ${resolved}`) as Error & { code: string }
     err.code = "invalid_path"
@@ -173,19 +175,30 @@ export interface AgentSummaryRow {
   mtime: number
 }
 
-export async function readAgentFile(
-  filePath: string,
-): Promise<{ meta: Record<string, unknown>; body: string; format: "v1" | "v2"; hash: string; mtime: number }> {
-  // ENOENT 必须映射成契约错误码 not_found，而不是把裸 ENOENT 抛成 500（第七轮 R7-2）
-  let content: string
+/**
+ * 读一个「代理文件」文本，把常见 IO 失败映射成契约错误码（第十二轮 S-12-6）：
+ * - ENOENT → not_found（第七轮 R7-2）
+ * - EISDIR / ENOTDIR / EACCES → invalid_path：传进来的是目录或读不了的文件，
+ *   语义上属于「路径不是可读的代理文件」，裸抛会变成 rpc.internal 500。
+ * readAgentFile 与 previewMigrationFile 共用，保证两个读入口一致。
+ */
+async function readAgentText(filePath: string): Promise<string> {
   try {
-    content = await fs.readFile(filePath, "utf8")
+    return await fs.readFile(filePath, "utf8")
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      fail("not_found", `agent file not found: ${filePath}`)
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === "ENOENT") fail("not_found", `agent file not found: ${filePath}`)
+    if (code === "EISDIR" || code === "ENOTDIR" || code === "EACCES") {
+      fail("invalid_path", `not a readable agent file: ${filePath}`)
     }
     throw err
   }
+}
+
+export async function readAgentFile(
+  filePath: string,
+): Promise<{ meta: Record<string, unknown>; body: string; format: "v1" | "v2"; hash: string; mtime: number }> {
+  const content = await readAgentText(filePath)
   const parsed = parseAgentFile(content)
   // 未解析别名 / 循环引用：读视图不可信，明确报 invalid_format（第七轮 R7-1）
   if (parsed.invalid === true) fail("invalid_format", `invalid frontmatter: ${filePath}`)
@@ -205,6 +218,9 @@ export async function readAgentFile(
       // 畸形 YAML：回退原始视图让编辑页能打开；保存时由 invalid_format 明确报错，不会写盘
     }
   }
+  // 读视图统一化：映射形态的 permissions 展开成规则数组（第十二轮 S-12-10）。
+  // GUI 的矩阵推导只认数组；不展开会退化成全 allow，保存时静默替换掉用户手写的效果。
+  normalizePermissionMapping(meta)
   return { meta, body, format: parsed.format, hash: hashOf(content), mtime: st?.mtime ?? 0 }
 }
 
@@ -214,6 +230,48 @@ function fail(code: string, message: string): never {
   const err = new Error(message) as Error & { code: string }
   err.code = code
   throw err
+}
+
+// ---------- 重试与降级（第十二轮 S-12-3 / S-12-7 / G-12-2） ----------
+
+type Delay = (ms: number) => Promise<void>
+
+const defaultDelay: Delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+let retryDelay: Delay = defaultDelay
+
+/**
+ * 注入重试退避（仅测试用）。传 null 恢复真实定时器。
+ * 让「3 次重试」的断言不依赖真实时钟，测试保持确定性。
+ */
+export function setRetryDelayForTests(delay: Delay | null): void {
+  retryDelay = delay ?? defaultDelay
+}
+
+const RETRY_ATTEMPTS = 3
+
+// rename 在 Windows 下会因另一方持有读句柄而 EPERM/EBUSY（G-12-2），短重试即可越过。
+const RENAME_RETRY_CODES = new Set(["EPERM", "EBUSY"])
+// 删除源文件失败多为 Windows 文件被占用（EBUSY/EPERM）或权限（EACCES），同属瞬时故障。
+const UNLINK_RETRY_CODES = new Set(["EBUSY", "EPERM", "EACCES"])
+// 硬链接不可用：exFAT/FAT32 U 盘、部分 SMB/NAS 会报 EPERM/ENOSYS/EOPNOTSUPP。
+// EPERM 语义模糊（权限拒绝也是 EPERM），但降级路径里的 copyFile/wx 会再裁决一次，
+// 失败即报错，不存在静默覆盖的风险（S-12-7）。
+const LINK_UNSUPPORTED_CODES = new Set(["EPERM", "ENOSYS", "EOPNOTSUPP", "ENOTSUP"])
+
+async function withRetry<T>(op: () => Promise<T>, retryable: ReadonlySet<string>): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await op()
+    } catch (err) {
+      lastError = err
+      const code = (err as NodeJS.ErrnoException).code ?? ""
+      if (!retryable.has(code) || attempt === RETRY_ATTEMPTS - 1) throw err
+      // 10ms / 15ms 递增退避，足以让另一方的读句柄释放
+      await retryDelay(10 + attempt * 5)
+    }
+  }
+  throw lastError
 }
 
 function assertIdUsable(id: string): void {
@@ -232,52 +290,103 @@ async function assertWritable(filePath: string, roots: readonly string[]): Promi
 
 // 原子写：先写同目录临时文件再 rename 覆盖。中途崩溃/磁盘满不会把原文件截断（第六轮 I2）。
 // writeFile 失败也要清理 tmp（第十一轮 F7：原来只有 rename 失败有清理）。
+// 第十二轮 G-12-2：Windows 下并发 force update 时 rename 会因另一方 copyFile 的读句柄
+// 抛 EPERM/EBUSY；短重试后仍然失败才抛原错误（持久锁是罕见故障，fail-loud 可接受）。
 async function atomicWrite(filePath: string, content: string): Promise<void> {
   const tmpFile = `${filePath}.tmp-${crypto.randomBytes(6).toString("hex")}`
   await fs.mkdir(path.dirname(filePath), { recursive: true })
   try {
     await fs.writeFile(tmpFile, content, "utf8")
-    await fs.rename(tmpFile, filePath)
+    await withRetry(() => fs.rename(tmpFile, filePath), RENAME_RETRY_CODES)
   } catch (err) {
     await fs.rm(tmpFile, { force: true }).catch(() => {})
     throw err
+  }
+}
+
+// 占位新文件：优先硬链接（原子、崩溃安全），卷不支持硬链接时降级 wx 排他创建。
+async function placeNewFile(tmpFile: string, filePath: string, content: string): Promise<void> {
+  try {
+    await fs.link(tmpFile, filePath)
+    return
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code ?? ""
+    if (code === "EEXIST") fail("exists", `agent file already exists: ${filePath}`)
+    if (!LINK_UNSUPPORTED_CODES.has(code)) throw err
+    // 降级（S-12-7）：wx 排他创建，EEXIST 仍是权威裁决。
+    // 注意：该路径非崩溃安全（写到一半崩溃会留下半个文件），仅用于不支持硬链接的卷。
+    try {
+      await fs.writeFile(filePath, content, { flag: "wx" })
+    } catch (fallbackErr) {
+      if ((fallbackErr as NodeJS.ErrnoException).code === "EEXIST") {
+        fail("exists", `agent file already exists: ${filePath}`)
+      }
+      throw fallbackErr
+    }
   }
 }
 
 // no-clobber 原子写（第十一轮 F1）：rename 在 Windows 会静默覆盖已存在目标，
 // 「先读检查再写」在并发下两个调用都能通过检查。link 占位是原子的：目标已存在即 EEXIST。
+// 第十二轮 S-12-5：link/wx 的 EEXIST 是权威裁决，调用方不再做存在性预检查
+// （预检查会在目标存在但不可读 EACCES 时把「重名」误报成 500）。
 async function atomicWriteNew(filePath: string, content: string): Promise<void> {
   const tmpFile = `${filePath}.tmp-${crypto.randomBytes(6).toString("hex")}`
   await fs.mkdir(path.dirname(filePath), { recursive: true })
   try {
     await fs.writeFile(tmpFile, content, "utf8")
-    await fs.link(tmpFile, filePath)
+    await placeNewFile(tmpFile, filePath, content)
   } catch (err) {
     await fs.rm(tmpFile, { force: true }).catch(() => {})
-    if ((err as NodeJS.ErrnoException).code === "EEXIST") {
-      fail("exists", `agent file already exists: ${filePath}`)
-    }
     throw err
   }
   await fs.rm(tmpFile, { force: true }).catch(() => {})
 }
 
-// no-clobber 移动（第十一轮 F1）：link 占位 + 删源。中途崩溃最坏留下两个名字指向同一内容，
-// 不会丢数据；rename 在 Windows 静默覆盖目标则会让输家源文件直接消失。
-async function moveNoClobber(from: string, to: string): Promise<void> {
+// 删源；最终失败时回滚刚占位的目标，恢复「操作前」状态（S-12-3 硬要求）。
+// 抛出的错误保持原样：持久锁是罕见故障，fail-loud 可接受，状态一致性优先。
+async function unlinkWithRollback(from: string, to: string): Promise<void> {
+  try {
+    await withRetry(() => fs.unlink(from), UNLINK_RETRY_CODES)
+  } catch (err) {
+    await fs.rm(to, { force: true }).catch(() => {})
+    throw err
+  }
+}
+
+// 占位移动目标：优先 link（原子 no-clobber），卷不支持时降级 copyFile(EXCL)。
+async function placeMove(from: string, to: string): Promise<void> {
   try {
     await fs.link(from, to)
+    return
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
     if (code === "EEXIST") fail("exists", `target already exists: ${to}`)
     if (code === "ENOENT") fail("not_found", `agent file not found: ${from}`)
-    throw err
+    if (!LINK_UNSUPPORTED_CODES.has(code ?? "")) throw err
+    // 降级（S-12-7）：copyFile 的 EXCL 同样保证不覆盖；EEXIST/ENOENT 语义与 link 一致。
+    try {
+      await fs.copyFile(from, to, fs.constants.COPYFILE_EXCL)
+    } catch (fallbackErr) {
+      const fallbackCode = (fallbackErr as NodeJS.ErrnoException).code
+      if (fallbackCode === "EEXIST") fail("exists", `target already exists: ${to}`)
+      if (fallbackCode === "ENOENT") fail("not_found", `agent file not found: ${from}`)
+      throw fallbackErr
+    }
   }
-  await fs.unlink(from)
+}
+
+// no-clobber 移动（第十一轮 F1）：link 占位 + 删源。中途崩溃最坏留下两个名字指向同一内容，
+// 不会丢数据；rename 在 Windows 静默覆盖目标则会让输家源文件直接消失。
+async function moveNoClobber(from: string, to: string): Promise<void> {
+  await placeMove(from, to)
+  await unlinkWithRollback(from, to)
 }
 
 // 只有 ENOENT 才算「不存在」；EBUSY/EACCES 等必须上抛，
-// 否则 create/rename 会把读不了的存在文件当成空位覆盖掉（第六轮 M1）。
+// 否则会把读不了的存在文件当成空位覆盖掉（第六轮 M1）。
+// 第十二轮 S-12-5：create/rename 已不再用它做存在性预检查（占位本身是权威裁决）；
+// 现在只剩 readRaw / trashAgentFile 需要「区分不存在与读不了」。
 async function readRawOrNull(filePath: string): Promise<string | null> {
   try {
     return await fs.readFile(filePath, "utf8")
@@ -331,9 +440,8 @@ export async function createAgentFile(params: {
   assertIdUsable(params.id)
   const filePath = idToPath(params.dir, params.id)
   await assertWritable(filePath, [params.dir])
-  if ((await readRawOrNull(filePath)) !== null) {
-    fail("exists", `agent file already exists: ${filePath}`)
-  }
+  // 第十二轮 S-12-5：不再做存在性预检查。atomicWriteNew 的 link/wx 占位是权威裁决，
+  // 预检查反而会在目标存在但不可读（EACCES）时把「重名」误报成裸 500。
   await atomicWriteNew(filePath, createV2Content(params))
   return filePath
 }
@@ -359,9 +467,20 @@ async function moveIntoTrash(filePath: string, trash: string, base: string): Pro
       const code = (err as NodeJS.ErrnoException).code
       if (code === "EEXIST") continue
       if (code === "ENOENT") fail("not_found", `agent file not found: ${filePath}`)
-      throw err
+      if (!LINK_UNSUPPORTED_CODES.has(code ?? "")) throw err
+      // 降级（S-12-7）：不支持硬链接的卷改用 copyFile(EXCL)。去重语义不变：
+      // 目标名已存在即换下一个后缀，源文件缺失仍是 not_found。
+      try {
+        await fs.copyFile(filePath, candidate, fs.constants.COPYFILE_EXCL)
+      } catch (fallbackErr) {
+        const fallbackCode = (fallbackErr as NodeJS.ErrnoException).code
+        if (fallbackCode === "EEXIST") continue
+        if (fallbackCode === "ENOENT") fail("not_found", `agent file not found: ${filePath}`)
+        throw fallbackErr
+      }
     }
-    await fs.unlink(filePath)
+    // 删源失败按 S-12-3 回滚：删掉刚放进回收站的那份，保持「操作前」状态
+    await unlinkWithRollback(filePath, candidate)
     return candidate
   }
   fail("exists", `cannot find a free trash name for: ${base}`)
@@ -443,10 +562,8 @@ export async function renameAgentFile(params: {
   await assertWritable(params.filePath, params.roots)
   const dir = path.dirname(params.filePath)
   const target = idToPath(dir, params.newId)
-  // 二次校验：目标存在即拒（不覆盖别人的文件）
-  if ((await readRawOrNull(target)) !== null) {
-    fail("exists", `target already exists: ${target}`)
-  }
+  // 第十二轮 S-12-5：目标存在性由 moveNoClobber 的 link/copyFile(EXCL) 原子裁决，
+  // 不再先 readRawOrNull 预检查（目标不可读时会变成裸 500，而不是 exists）。
   const raw = await readRaw(params.filePath)
   // V1 文件重命名后 name 与新文件名会不一致 → 直接删 name（goal.md §6.1）
   const parsed = parseAgentFile(raw)
@@ -481,9 +598,10 @@ export async function trashAgentFile(params: {
 
 // ---------- 迁移预览（P2-T8 / 中期审查 P3-2） ----------
 // 读文件失败必须映射成契约错误码 not_found，而不是把 ENOENT 抛成 500。
+// 第十二轮 S-12-6：与 readAgentFile 共用 readAgentText，目录/权限错误统一为 invalid_path。
 export async function previewMigrationFile(params: {
   filePath: string
 }): Promise<{ before: string; after: string; changes: MigrateChange[] }> {
-  const raw = await readRaw(params.filePath)
+  const raw = await readAgentText(params.filePath)
   return migratePreview(raw)
 }

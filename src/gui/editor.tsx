@@ -1,11 +1,11 @@
 // src/gui/editor.tsx —— 编辑 / 新建页（goal.md §6、§7）
 // 判定逻辑在 editor-form.ts（可单测），本文件只负责渲染与事件。
-import { createSignal, createMemo, Show, For, onMount } from "solid-js"
+import { createSignal, createMemo, Show, For, onMount, onCleanup } from "solid-js"
 import { usePlugin } from "@opencode/plugin/gui"
 import { Subagents, ACTIONS } from "../rpc"
 import type { AgentPatch, PermissionMatrix, ReadOutput, ProviderSummary, ModelsOutput, MigrateChange } from "../rpc"
 import { matrixFromRules } from "../core/permissions.ts"
-import { buildPatch, validateEditor, createInputOf, conflictAction, isConflictError, modelRefFromRead } from "./editor-form"
+import { buildPatch, validateEditor, createInputOf, conflictAction, isConflictError, sanitizeLoadedColor, sanitizeLoadedModelRef, formValuesEqual, type EditorFormValues } from "./editor-form"
 import { variantsOf } from "./model-picker-logic"
 import { saveStep } from "./migration-logic"
 import { MigrationDialog } from "./migration-dialog"
@@ -40,6 +40,11 @@ export function EditorPage(props: {
   onBack: () => void
   onSaved: () => void
   onDelete?: () => void
+  /**
+   * 自致写操作窗口（第十二轮 G-12-3）：编辑页发起写 RPC 前置位、响应后复位。
+   * 列表页据此忽略服务端「先 emit changed 再返回结果」造成的那条事件，避免误弹「磁盘已更新」。
+   */
+  onSelfWriteChange?: (active: boolean) => void
 }) {
   const ctx = usePlugin()
   const [loading, setLoading] = createSignal(props.target.mode === "edit")
@@ -60,6 +65,31 @@ export function EditorPage(props: {
   const [previewOpen, setPreviewOpen] = createSignal(false)
   // V1 文件本次编辑是否已确认迁移预览（goal.md §9.1：首次保存前弹一次）
   const [migrateConfirmed, setMigrateConfirmed] = createSignal(false)
+  /**
+   * 装载时的表单快照（第十二轮 G-12-9）。
+   * 重命名成功后编辑页会被关闭；若表单有未保存修改就会无声丢弃。
+   * cancel() 有二次确认，两条路径必须一致，所以需要「相对装载基线是否改过」的判定。
+   * create 模式没有基线：新建页面上填的任何内容都算未保存。
+   */
+  const [baseline, setBaseline] = createSignal<EditorFormValues | undefined>(undefined)
+
+  /**
+   * 自致写操作窗口（第十二轮 G-12-3）。
+   * 服务端每次写操作都是「先 emit changed 再返回 RPC 结果」，
+   * 窗口必须在发起 RPC 之前打开、在响应（含失败）之后关闭，
+   * 否则先到达的 changed 会被当成外部修改，弹出语义误导的「磁盘已更新」。
+   */
+  const withSelfWrite = async <T,>(run: () => Promise<T>): Promise<T> => {
+    props.onSelfWriteChange?.(true)
+    try {
+      return await run()
+    } finally {
+      props.onSelfWriteChange?.(false)
+    }
+  }
+
+  // 编辑页被卸载时兜底复位自致窗口：否则列表页会永久忽略 changed，外部修改再也刷不出来
+  onCleanup(() => props.onSelfWriteChange?.(false))
 
   onMount(() => {
     if (props.target.mode !== "edit" || !props.target.path) return
@@ -72,20 +102,34 @@ export function EditorPage(props: {
         setDescription(typeof meta.description === "string" ? meta.description : "")
         setBody(res.body)
         // 缺陷 B：V1 的 variant 是独立字段，必须并进 modelRef，否则保存时 patch 会丢掉 #variant
-        const parts = modelRefFromRead(meta, res.format)
+        // 第十二轮 G-12-8：非法 model / color 视为未设置（UI 显示继承默认），
+        // 首次保存时 patch 不带这两个键，服务端随之把它们从文件里删除。
+        const parts = sanitizeLoadedModelRef(meta, res.format)
+        const nextColor = sanitizeLoadedColor(meta.color)
+        const nextHidden = meta.hidden === true
+        const nextSteps = typeof meta.steps === "number" ? String(meta.steps) : ""
+        const nextMatrix = matrixFromRules(
+          Array.isArray(meta.permissions) ? (meta.permissions as never) : undefined,
+          res.format === "v1" && meta.permission && typeof meta.permission === "object"
+            ? (meta.permission as Record<string, unknown>)
+            : undefined,
+        )
         setModel(parts.model)
         setVariant(parts.variant)
-        setColor(typeof meta.color === "string" ? meta.color : undefined)
-        setHidden(meta.hidden === true)
-        setStepsText(typeof meta.steps === "number" ? String(meta.steps) : "")
-        setMatrix(
-          matrixFromRules(
-            Array.isArray(meta.permissions) ? (meta.permissions as never) : undefined,
-            res.format === "v1" && meta.permission && typeof meta.permission === "object"
-              ? (meta.permission as Record<string, unknown>)
-              : undefined,
-          ),
-        )
+        setColor(nextColor)
+        setHidden(nextHidden)
+        setStepsText(nextSteps)
+        setMatrix(nextMatrix)
+        setBaseline({
+          description: typeof meta.description === "string" ? meta.description : "",
+          body: res.body,
+          model: parts.model,
+          variant: parts.variant,
+          color: nextColor,
+          hidden: nextHidden,
+          stepsText: nextSteps,
+          matrix: nextMatrix,
+        })
       } catch (e) {
         setLoadError(errorDescription(ctx.t, e))
       } finally {
@@ -93,6 +137,26 @@ export function EditorPage(props: {
       }
     })()
   })
+
+  /** 当前表单值（与 baseline 同形状），用于 dirty 判定。 */
+  const formValues = (): EditorFormValues => ({
+    description: description(),
+    body: body(),
+    model: model(),
+    variant: variant(),
+    color: color(),
+    hidden: hidden(),
+    stepsText: stepsText(),
+    matrix: matrix(),
+  })
+
+  /** 是否有未保存修改。create 模式恒为 true（用户输入的任何内容都没落盘）。 */
+  const dirty = (): boolean => {
+    if (props.target.mode === "create") return true
+    const base = baseline()
+    if (!base) return false
+    return !formValuesEqual(formValues(), base)
+  }
 
   const id = () => (props.target.mode === "create" ? draftId() : props.target.id ?? "")
   const validation = createMemo(() =>
@@ -149,17 +213,22 @@ export function EditorPage(props: {
     if (saving()) return
     setSaving(true)
     try {
+      // G-12-3：自致窗口只包住写 RPC（见 saveUpdate 内部的 withSelfWrite）。
+      // 冲突弹窗等用户交互期间不置位——那段时间的外部修改仍应照常提示。
       if (props.target.mode === "create") {
         // P2-T7：作用域继承列表当前选择；可选字段按需带（createInputOf 已单测）
-        await ctx.client.rpc(Subagents).create(
-          createInputOf({ scope: props.target.scope, id: id(), patch: currentPatch() }),
+        await withSelfWrite(() =>
+          ctx.client.rpc(Subagents).create(
+            createInputOf({ scope: props.target.scope, id: id(), patch: currentPatch() }),
+          ),
         )
         ctx.toast.show({ title: ctx.t("toast.created"), variant: "success" })
-      } else {
-        const result = await saveUpdate()
-        if (result === "reloaded") return
-        ctx.toast.show({ title: ctx.t("toast.saved"), variant: "success" })
+        props.onSaved()
+        return
       }
+      const outcome = await saveUpdate()
+      if (outcome === "reloaded") return
+      ctx.toast.show({ title: ctx.t("toast.saved"), variant: "success" })
       props.onSaved()
     } catch (e) {
       ctx.toast.show({
@@ -179,13 +248,15 @@ export function EditorPage(props: {
   // 因此拆成「弹预览」→「用户点确认才继续保存」两步。
   const openMigrationPreview = async () => {
     const pathArg = props.target.path!
+    // G-12-1：in-flight 置位必须在 await 之前（同步执行到第一个 await 前），
+    // 否则 RPC 返回前的第二次点击会再发一次 migratePreview 并叠加第二个预览弹窗。
+    setPreviewOpen(true)
     try {
       const preview = (await ctx.client.rpc(Subagents).migratePreview({ path: pathArg })) as unknown as {
         before: string
         after: string
         changes: MigrateChange[]
       }
-      setPreviewOpen(true)
       ctx.dialogs.open((dialog) => (
         <MigrationDialog
           ctx={ctx}
@@ -203,6 +274,8 @@ export function EditorPage(props: {
         />
       ))
     } catch (e) {
+      // RPC 失败：复位，否则保存按钮会被永久挡住
+      setPreviewOpen(false)
       ctx.toast.show({
         title: ctx.t("common.error"),
         description: errorDescription(ctx.t, e),
@@ -214,7 +287,10 @@ export function EditorPage(props: {
   const saveUpdate = async (): Promise<"saved" | "reloaded"> => {
     const pathArg = props.target.path!
     try {
-      await ctx.client.rpc(Subagents).update({ path: pathArg, expectedHash: hash()!, patch: currentPatch() })
+      // G-12-3：自致窗口只覆盖写 RPC 本身
+      await withSelfWrite(() =>
+        ctx.client.rpc(Subagents).update({ path: pathArg, expectedHash: hash()!, patch: currentPatch() }),
+      )
       return "saved"
     } catch (e) {
       if (!isConflictError(e)) throw e
@@ -230,7 +306,9 @@ export function EditorPage(props: {
         current: "reload",
       })
       if (conflictAction(choice) === "overwrite") {
-        await ctx.client.rpc(Subagents).update({ path: pathArg, expectedHash: hash()!, patch: currentPatch(), force: true })
+        await withSelfWrite(() =>
+          ctx.client.rpc(Subagents).update({ path: pathArg, expectedHash: hash()!, patch: currentPatch(), force: true }),
+        )
         return "saved"
       }
       // P2-1：选「重新加载」或取消弹窗都必须离开编辑页。
@@ -248,6 +326,24 @@ export function EditorPage(props: {
     })
     if (!ok) return
     props.onBack()
+  }
+
+  /**
+   * 重命名成功后是否可以直接离开编辑页（第十二轮 G-12-9）。
+   *
+   * 旧实现无条件 onSaved()，表单里未保存的修改被无声丢弃；
+   * 而 cancel() 是有二次确认的，两条离开路径行为不一致。
+   * 这里复用 cancel 的同一套文案（不新增 i18n 键）：dirty 时先确认，拒绝则留在编辑页。
+   */
+  const closeAfterRename = async () => {
+    if (dirty()) {
+      const ok = await ctx.dialogs.confirm({
+        title: ctx.t("editor.unsaved.title"),
+        description: ctx.t("editor.unsaved.desc"),
+      })
+      if (!ok) return
+    }
+    props.onSaved()
   }
 
   return (
@@ -297,13 +393,18 @@ export function EditorPage(props: {
                         {
                           confirm: (input) => ctx.dialogs.confirm(input),
                           prompt: (input) => ctx.dialogs.prompt(input),
-                          rename: (input) => ctx.client.rpc(Subagents).rename(input) as unknown as Promise<{ path: string }>,
+                          // G-12-3：自致窗口只包住写 RPC，确认 / 输入弹窗期间的外部修改仍要提示
+                          rename: (input) =>
+                            withSelfWrite(() =>
+                              ctx.client.rpc(Subagents).rename(input) as unknown as Promise<{ path: string }>,
+                            ),
                           toast: (input) => ctx.toast.show(input),
                           t: ctx.t,
                         },
                         { id: id(), path: props.target.path! },
                       )
-                      if (result === "renamed") props.onSaved()
+                      // G-12-9：重命名成功但表单有未保存修改时，先走与 cancel 相同的确认流程
+                      if (result === "renamed") await closeAfterRename()
                     })().catch((err) => {
                       ctx.toast.show({
                         title: ctx.t("common.error"),
