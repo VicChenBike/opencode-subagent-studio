@@ -1,6 +1,7 @@
 {
   "name": "opencode-subagent-manager",
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "private": true,
   "exports": {
@@ -8,6 +9,10 @@
     "./rpc": "./src/rpc.ts",
     "./gui-experimental": "./dist/gui-experimental.cjs"
   },
+  "files": [
+    "src",
+    "dist"
+  ],
   "scripts": {
     "test": "node --test --experimental-strip-types \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
