@@ -59,6 +59,7 @@ export const en = {
     "editor.invalidId": "Invalid name format",
     "editor.reservedId": "\"{{id}}\" is a reserved built-in ID",
     "editor.duplicateId": "\"{{id}}\" already exists",
+    "editor.unchangedId": "The new ID is the same as the current one",
     "editor.unsaved.title": "Unsaved changes",
     "editor.unsaved.desc": "Changes are not saved. Leave anyway?",
     "editor.nameReadonly": "Renaming changes the agent ID. Use Rename with care.",
@@ -108,4 +109,8 @@ export const en = {
     "error.exists": "A file with this name already exists",
     "error.notFound": "File not found",
     "error.conflict": "File was modified elsewhere",
+    "error.invalidId": "Invalid agent ID format",
+    "error.reservedId": "This ID is reserved",
+    "error.migrationRequired": "This legacy file must be migrated before toggling",
+    "error.invalidFormat": "The frontmatter is malformed; fix the YAML before saving",
 } as const

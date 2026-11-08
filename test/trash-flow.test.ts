@@ -86,7 +86,7 @@ test("trashAgent surfaces the host error message, not an object dump", async () 
 test("trashAgent falls back to the raw message for codes without copy", async () => {
   const { calls, deps } = fakeDeps({
     confirmed: true,
-    removeError: Object.assign(new Error("bad id"), { type: "invalid_id" }),
+    removeError: Object.assign(new Error("bad id"), { type: "rpc.internal" }),
   })
   await trashAgent(deps, agent)
   const toast = calls.toast[0] as { description: string }

@@ -4,7 +4,7 @@ import { createSignal, createMemo, For, Show, onMount } from "solid-js"
 import type { Context } from "@opencode/plugin/gui"
 import { Subagents } from "../rpc"
 import type { ProviderSummary, ModelsOutput } from "../rpc"
-import { filterProviders, isSelected } from "./model-picker-logic"
+import { filterProviders, isSelected, variantOnPick } from "./model-picker-logic"
 
 export function openModelPicker(
   ctx: Context,
@@ -90,7 +90,10 @@ function ModelPickerDialog(props: {
                       return (
                         <ctx.ui.Button
                           variant={selected() ? "contrast" : "ghost"}
-                          onClick={() => pick(`${p.id}/${m.id}`, undefined)}
+                          onClick={() => {
+                            const ref = `${p.id}/${m.id}`
+                            pick(ref, variantOnPick(ref, props.current, props.variant))
+                          }}
                         >
                           <span>
                             {m.name}

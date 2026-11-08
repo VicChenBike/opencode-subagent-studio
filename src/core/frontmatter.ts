@@ -11,15 +11,31 @@ export interface ParsedFile {
   body: string
   format: "v1" | "v2"
   raw: string
+  /** frontmatter 无法安全表示为普通对象（未解析别名 / 循环引用），第七轮 R7-1 */
+  invalid?: boolean
 }
 
 const V2_MARKERS = ["permissions", "request", "system", "disabled"] as const
 
 export function splitFrontmatter(raw: string): { frontmatter: string | null; body: string } {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(raw)
-  if (!match) return { frontmatter: null, body: raw }
+  // Windows 编辑器可能带 UTF-8 BOM；不剥掉会让 ^--- 锚定失败，整个文件被当成正文（第六轮 I3）
+  // m 标志让闭合的 ^--- 能锚定到行首；空 frontmatter（---\n---\n）因此可识别（第七轮 R7-11）。
+  const match = /^---[ \t]*\r?\n([\s\S]*?)^---[ \t]*\r?\n?([\s\S]*)$/m.exec(raw.replace(/^\uFEFF/, ""))
+  // m 标志下 ^ 也能匹配正文里的任意行首；只有 index 0 才是真正的 frontmatter 起始。
+  if (!match || match.index !== 0) return { frontmatter: null, body: raw }
   // 去掉 `---` 之后的一个空行分隔符；正文其余内容原样保留
   return { frontmatter: match[1], body: match[2].replace(/^\r?\n/, "") }
+}
+
+/** 检测文本的行尾风格（混合时按 CRLF 处理）。第七轮 R7-10 */
+export function detectEol(raw: string): "\n" | "\r\n" {
+  return raw.includes("\r\n") ? "\r\n" : "\n"
+}
+
+/** 把一段内容统一成指定行尾。第七轮 R7-10 */
+export function applyEol(content: string, eol: "\n" | "\r\n"): string {
+  if (eol === "\n") return content
+  return content.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n")
 }
 
 export function detectFormat(meta: Record<string, unknown>): "v1" | "v2" {
@@ -30,14 +46,13 @@ export function parseAgentFile(raw: string): ParsedFile {
   const { frontmatter, body } = splitFrontmatter(raw)
   if (frontmatter === null) return { meta: {}, body: raw, format: "v1", raw }
   const doc = parseDocument(frontmatter)
-  const js = doc.toJS()
   // frontmatter 不是映射（纯标量 / 数组 / null / 解析失败）时按空 meta 处理，
-  // 避免单个畸形文件让整份目录扫描抛错。
-  const meta = isPlainMapping(js) ? (js as Record<string, unknown>) : {}
+  // 避免单个畸形文件让整份目录扫描抛错；无法安全表示的文件额外标 invalid（第七轮 R7-1）。
+  const { meta, unsafe } = plainMetaOf(doc)
   // 先按原始字段判格式，再做 V1 归一化——否则归一化写入的 `disabled` 会让 V1 文件被误判成 V2
   const format = detectFormat(meta)
   normalizeV1Keys(meta)
-  return { meta, body, format, raw }
+  return { meta, body, format, raw, invalid: unsafe }
 }
 
 /**
@@ -59,6 +74,30 @@ function isPlainMapping(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
+/**
+ * Document → 普通 JS 映射。
+ *
+ * 未解析别名（`*nope`）与循环引用（`&a [*a]`）会让 `toJS()` 抛错或产出无法 JSON 序列化的对象；
+ * 这类文件统一降级成「空 meta + unsafe」，让调用方能跳过或报 invalid_format，
+ * 而不是让一个坏文件炸掉整次目录扫描（第七轮 R7-1）。
+ */
+function plainMetaOf(doc: Document): { meta: Record<string, unknown>; unsafe: boolean } {
+  let js: unknown
+  try {
+    js = doc.toJS()
+  } catch {
+    return { meta: {}, unsafe: true }
+  }
+  if (!isPlainMapping(js)) return { meta: {}, unsafe: false }
+  try {
+    // JSON.stringify 是探测循环引用的最直接方式；能序列化才算安全。
+    JSON.stringify(js)
+  } catch {
+    return { meta: {}, unsafe: true }
+  }
+  return { meta: js, unsafe: false }
+}
+
 function rulesToNode(doc: Document, rules: readonly PermissionRule[]) {
   return doc.createNode(
     rules.map((r) => ({ action: r.action, resource: r.resource, effect: r.effect })),
@@ -69,6 +108,27 @@ function bodyFromPatch(patch: Pick<AgentPatch, "body">): string {
   // 保存时 trim 尾部空白，保留开头（goal.md §6.5）
   const trimmedEnd = patch.body.replace(/\s+$/, "")
   return trimmedEnd.length > 0 ? trimmedEnd + "\n" : ""
+}
+
+// 带解析错误（重复键 / 坏缩进 / 未闭引号等）的 Document 无法 toString；
+// 提前转成声明错误码 invalid_format，避免裸 throw 被宿主包成 rpc.internal 500（第六轮 I1）。
+// 第七轮 R7-1：未解析别名 / 循环引用不一定进 doc.errors，但 toJS/JSON.stringify 会抛，同样要拦。
+function invalidFormatError(message: string): Error & { code: string } {
+  const err = new Error(message) as Error & { code: string }
+  err.code = "invalid_format"
+  return err
+}
+
+export function assertDocSound(doc: Document): void {
+  if (doc.errors.length > 0) {
+    throw invalidFormatError(`invalid frontmatter: ${doc.errors[0].message}`)
+  }
+  try {
+    const js = doc.toJS()
+    if (js !== null && js !== undefined) JSON.stringify(js)
+  } catch {
+    throw invalidFormatError("invalid frontmatter: unrepresentable value")
+  }
 }
 
 // 新建文件：固定字段序 description/mode/model/hidden/color/steps/permissions（goal.md §7：一律 V2、无 name）
@@ -91,6 +151,7 @@ export function createV2Content(patch: AgentPatch): string {
 export function applyPatchToSource(raw: string, patch: AgentPatch): string {
   const { frontmatter } = splitFrontmatter(raw)
   const doc: Document = frontmatter === null ? new Document() : parseDocument(frontmatter)
+  assertDocSound(doc)
   const existingRules = extractRules(doc)
   // description（必填）
   doc.set("description", patch.description)
@@ -109,7 +170,8 @@ export function applyPatchToSource(raw: string, patch: AgentPatch): string {
   // permissions：整组替换（existing 的细粒度规则由 rulesFromMatrix 保留到末尾）
   doc.set("permissions", rulesToNode(doc, rulesFromMatrix(patch.matrix, existingRules)))
   const fm = doc.toString().replace(/\n$/, "")
-  return `---\n${fm}\n---\n\n${bodyFromPatch(patch)}`
+  // 行尾跟随原文件：CRLF 文件写回后仍是 CRLF（第七轮 R7-10）
+  return applyEol(`---\n${fm}\n---\n\n${bodyFromPatch(patch)}`, detectEol(raw))
 }
 
 // 从 Document 里读出既有 permissions 规则，供 rulesFromMatrix 保留细粒度项。
@@ -150,8 +212,10 @@ export function migrateContent(raw: string): { content: string; changes: Migrate
   const { frontmatter, body } = splitFrontmatter(raw)
   if (frontmatter === null) return { content: raw, changes: [] }
   const doc = parseDocument(frontmatter)
-  const js = doc.toJS()
-  const meta = isPlainMapping(js) ? js : {}
+  assertDocSound(doc)
+  // 通过 toJS + JSON.stringify 探测循环引用；不安全的 frontmatter 无法整份迁移（第七轮 R7-1）
+  const { meta, unsafe } = plainMetaOf(doc)
+  if (unsafe) throw invalidFormatError("invalid frontmatter: unrepresentable value")
   // 已经是 V2：整份原样返回，不做任何改动
   if (detectFormat(meta) === "v2") return { content: raw, changes: [] }
   const changes: MigrateChange[] = []
@@ -188,11 +252,17 @@ export function migrateContent(raw: string): { content: string; changes: Migrate
   }
   if (doc.has("variant")) doc.delete("variant")
 
-  // tools 的 false 值 → deny 规则
+  // tools 的 false 值 → deny 规则。动作名必须先走 V1 改名表（bash→shell 等），
+  // 否则生成宿主不认识的死规则、deny 静默失效（第六轮 C5）；改名后同 action 去重（write/patch 都→edit）。
   const toolRules: PermissionRule[] = []
   if (isPlainMapping(meta["tools"])) {
+    const seen = new Set<string>()
     for (const [tool, enabled] of Object.entries(meta["tools"])) {
-      if (enabled === false) toolRules.push({ action: tool, resource: "*", effect: "deny" })
+      if (enabled !== false) continue
+      const action = V1_ACTION_RENAME[tool] ?? tool
+      if (seen.has(action)) continue
+      seen.add(action)
+      toolRules.push({ action, resource: "*", effect: "deny" })
     }
     doc.delete("tools")
     changes.push({ field: "tools", action: "convert" })
@@ -229,7 +299,8 @@ export function migrateContent(raw: string): { content: string; changes: Migrate
 
   const fm = doc.toString().replace(/\n$/, "")
   const finalBody = promptBody !== null ? promptBody.replace(/\s+$/, "") + "\n" : body
-  return { content: `---\n${fm}\n---\n\n${finalBody}`, changes }
+  // 行尾跟随原文件：CRLF 文件迁移后仍是 CRLF（第七轮 R7-10）
+  return { content: applyEol(`---\n${fm}\n---\n\n${finalBody}`, detectEol(raw)), changes }
 }
 
 // V1 permission 里需要原样带进 V2 的细粒度条目：嵌套映射中非 "*" 的 resource。
@@ -249,12 +320,14 @@ function flattenV1FineRules(map: Record<string, unknown>): PermissionRule[] {
 
 // 矩阵外 action 的平映射条目（如 todowrite），只有 effect 与默认不同才有语义。
 // 这些规则的 resource 是 "*"，会被 rulesFromMatrix 的细规则通道过滤，故由调用方单独合并到末尾。
+// 顶层 `"*"` 是默认档而非动作，由 matrixFromRules 提升为 defaultEffect（第七轮审查）。
 function extraV1Rules(
   map: Record<string, unknown>,
   defaultEffect: PermissionRule["effect"],
 ): PermissionRule[] {
   const out: PermissionRule[] = []
   for (const [rawAction, value] of Object.entries(map)) {
+    if (rawAction === "*") continue
     if (isPlainMapping(value)) continue
     const action = V1_ACTION_RENAME[rawAction] ?? rawAction
     if ((ACTIONS as readonly string[]).includes(action)) continue

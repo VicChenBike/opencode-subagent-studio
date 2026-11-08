@@ -55,6 +55,7 @@ export const hi = {
     "editor.invalidId": "नाम का प्रारूप अमान्य है",
     "editor.reservedId": "\"{{id}}\" एक आरक्षित अंतर्निहित ID है",
     "editor.duplicateId": "\"{{id}}\" पहले से मौजूद है",
+    "editor.unchangedId": "नई ID वर्तमान के समान है",
     "editor.unsaved.title": "असहेजे परिवर्तन",
     "editor.unsaved.desc": "परिवर्तन सहेजे नहीं गए हैं। फिर भी बाहर निकलें?",
     "editor.nameReadonly": "नाम बदलने से एजेंट ID बदल जाता है। सावधानी से उपयोग करें।",
@@ -104,4 +105,8 @@ export const hi = {
     "error.exists": "इस नाम की फ़ाइल पहले से मौजूद है",
     "error.notFound": "फ़ाइल नहीं मिली",
     "error.conflict": "फ़ाइल कहीं और से बदली गई",
+    "error.invalidId": "एजेंट ID प्रारूप अमान्य है",
+    "error.reservedId": "यह ID आरक्षित है",
+    "error.migrationRequired": "टॉगल करने से पहले इस पुरानी फ़ाइल को माइग्रेट करें",
+    "error.invalidFormat": "frontmatter विकृत है; सहेजने से पहले YAML ठीक करें",
 } as const

@@ -57,6 +57,7 @@ export const zh = {
     "editor.invalidId": "名称格式不正确",
     "editor.reservedId": "「{{id}}」是内置保留 ID",
     "editor.duplicateId": "「{{id}}」已存在",
+    "editor.unchangedId": "新 ID 与当前相同",
     "editor.unsaved.title": "未保存的更改",
     "editor.unsaved.desc": "更改尚未保存，确定离开？",
     "editor.nameReadonly": "重命名会改变代理 ID，请谨慎操作。",
@@ -106,4 +107,8 @@ export const zh = {
     "error.exists": "同名文件已存在",
     "error.notFound": "文件不存在",
     "error.conflict": "文件已被其他修改",
+    "error.invalidId": "代理 ID 格式无效",
+    "error.reservedId": "该 ID 是保留 ID",
+    "error.migrationRequired": "请先迁移此旧版文件，再切换开关",
+    "error.invalidFormat": "frontmatter 格式有误，请先修复 YAML 再保存",
 } as const

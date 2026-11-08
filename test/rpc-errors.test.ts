@@ -124,5 +124,5 @@ test("the third argument is a plain empty object every declared code can encode"
       )
     }
   }
-  assert.ok(ERROR_CODES.length === 7)
+  assert.ok(ERROR_CODES.length === 8)
 })

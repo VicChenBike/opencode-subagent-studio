@@ -56,6 +56,7 @@ export const br = {
     "editor.invalidId": "Formato de nome inválido",
     "editor.reservedId": "\"{{id}}\" é um ID integrado reservado",
     "editor.duplicateId": "\"{{id}}\" já existe",
+    "editor.unchangedId": "O novo ID é igual ao atual",
     "editor.unsaved.title": "Alterações não salvas",
     "editor.unsaved.desc": "As alterações não foram salvas. Sair mesmo assim?",
     "editor.nameReadonly": "Renomear muda o ID do agente. Use com cuidado.",
@@ -105,4 +106,8 @@ export const br = {
     "error.exists": "Já existe um arquivo com este nome",
     "error.notFound": "Arquivo não encontrado",
     "error.conflict": "O arquivo foi modificado em outro lugar",
+    "error.invalidId": "Formato de ID de agente inválido",
+    "error.reservedId": "Este ID é reservado",
+    "error.migrationRequired": "Este arquivo legado precisa ser migrado antes de alternar o interruptor",
+    "error.invalidFormat": "O frontmatter está malformado; corrija o YAML antes de salvar",
 } as const

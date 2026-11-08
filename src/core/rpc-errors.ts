@@ -15,6 +15,7 @@ export const ERROR_CODES = [
   "not_found",
   "conflict",
   "migration_required",
+  "invalid_format",
 ] as const satisfies readonly ErrorCode[]
 
 const DECLARED = new Set<string>(ERROR_CODES)

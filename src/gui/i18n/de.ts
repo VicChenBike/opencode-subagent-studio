@@ -55,6 +55,7 @@ export const de = {
     "editor.invalidId": "Ungültiges Namensformat",
     "editor.reservedId": "\"{{id}}\" ist eine reservierte integrierte ID",
     "editor.duplicateId": "\"{{id}}\" existiert bereits",
+    "editor.unchangedId": "Die neue ID ist mit der aktuellen identisch",
     "editor.unsaved.title": "Ungespeicherte Änderungen",
     "editor.unsaved.desc": "Änderungen sind nicht gespeichert. Trotzdem verlassen?",
     "editor.nameReadonly": "Umbenennen ändert die Agent-ID. Mit Vorsicht verwenden.",
@@ -104,4 +105,8 @@ export const de = {
     "error.exists": "Eine Datei mit diesem Namen existiert bereits",
     "error.notFound": "Datei nicht gefunden",
     "error.conflict": "Die Datei wurde woanders geändert",
+    "error.invalidId": "Ungültiges Agent-ID-Format",
+    "error.reservedId": "Diese ID ist reserviert",
+    "error.migrationRequired": "Diese Legacy-Datei muss vor dem Umschalten migriert werden",
+    "error.invalidFormat": "Das Frontmatter ist fehlerhaft; korrigieren Sie das YAML vor dem Speichern",
 } as const

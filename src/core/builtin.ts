@@ -49,6 +49,15 @@ export function parseOverride(value: string | undefined): ModelRefParts | undefi
 }
 
 /**
+ * 内置覆盖值是否合法（第七轮 R7-7）：空值 = 继承默认，合法；
+ * 非空则必须是可解析的 "provider/model[#variant]"。
+ */
+export function isValidBuiltinModel(model: string | undefined): boolean {
+  if (model === undefined || model === "") return true
+  return parseOverride(model) !== undefined
+}
+
+/**
  * 把覆盖值应用到编辑器。
  * 只处理 `builtin-model.<id>` 形式且值合法的键；其余忽略。
  * 没有覆盖的内置代理完全不碰（保持宿主给的原生模型）。
@@ -86,6 +95,26 @@ export function applyBuiltinOverrideToCache(
   const key = overrideKeyOf(id)
   if (model === undefined || model === "") cache.delete(key)
   else cache.set(key, model)
+}
+
+/**
+ * 写内置覆盖：先落 storage，成功后再改缓存（第六轮 M10）。
+ * 顺序反过来会在 storage 写失败时让 transform 继续应用一个重启后即消失的覆盖。
+ * handler 在本函数返回后才 reload，同步 transform 约束不受影响。
+ */
+export async function writeBuiltinOverride(
+  storage: { set: (key: string, value: string) => Promise<void>; remove: (key: string) => Promise<void> },
+  cache: OverrideCache,
+  id: (typeof BUILTIN_IDS)[number],
+  model?: string,
+): Promise<void> {
+  const key = overrideKeyOf(id)
+  if (model === undefined || model === "") {
+    await storage.remove(key)
+  } else {
+    await storage.set(key, model)
+  }
+  applyBuiltinOverrideToCache(cache, id, model)
 }
 
 /**

@@ -174,8 +174,8 @@ test("isConflictError tolerates a nested or wrapped payload", () => {
   // 某些路径会把错误放在 data / cause 里
   assert.equal(isConflictError({ type: "rpc.internal", message: "x", data: { type: "conflict" } }), true)
   assert.equal(isConflictError({ cause: { type: "conflict", message: "x" } }), true)
-  // 消息里带 conflict 字样（旧行为）仍算命中，保持向后兼容
-  assert.equal(isConflictError(new Error("conflict: file changed on disk")), true)
+  // 第六轮 M2：不再认 message 子串——名为 conflict.md 的文件 not_found 会被误判成冲突
+  assert.equal(isConflictError(new Error("conflict: file changed on disk")), false)
 })
 
 test("isConflictError rejects unrelated failures", () => {

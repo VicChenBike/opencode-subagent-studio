@@ -8,6 +8,7 @@ import os from "node:os"
 import { parseDocument, Document } from "yaml"
 import {
   parseAgentFile, createV2Content, applyPatchToSource, migrateContent, splitFrontmatter, migratePreview,
+  assertDocSound, detectEol, applyEol,
 } from "./frontmatter.ts"
 import { matrixFromRules } from "./permissions.ts"
 import { isValidAgentId, isReservedId } from "./ids.ts"
@@ -21,9 +22,40 @@ export function projectAgentsDir(projectPath: string): string {
   return path.join(projectPath, ".opencode", "agents")
 }
 
+/**
+ * 按作用域解析 agents 目录（RPC list/create 共用）。
+ * project 作用域必须带非空 projectPath，否则返回 invalid_path 而不是静默落到用户级目录
+ * （第七轮 R7-6：旧的 `scope === "project" && projectPath` 三元表达式会静默降级）。
+ */
+export function resolveAgentsDir(scope: "user" | "project", projectPath?: string): string {
+  if (scope === "project") {
+    if (typeof projectPath !== "string" || projectPath.trim() === "") {
+      fail("invalid_path", "project scope requires projectPath")
+    }
+    return projectAgentsDir(projectPath)
+  }
+  return userAgentsDir()
+}
+
+// create 的项目根必须是已存在的目录：写入白名单由路径形状推导（本地 RPC 威胁模型下
+// 无法访问宿主项目列表），至少不能任由调用方在任意伪造路径下创建目录树（第六轮 I4）。
+export async function assertProjectRootExists(projectPath: string): Promise<void> {
+  const st = await fs.stat(projectPath).catch(() => null)
+  if (!st || !st.isDirectory()) {
+    fail("invalid_path", `project path is not an existing directory: ${projectPath}`)
+  }
+}
+
 // 回收站与 agents/ 同级；绝不放在 agents/ 内（AGENTS.md 坑 6）
 export function trashDirFor(agentsDir: string): string {
   return path.join(path.dirname(agentsDir), "agents-trash")
+}
+
+// 路径比较键：win32 下大小写不敏感（第七轮 R7-13）。
+// 不做这一步时，用户级白名单会因盘符/目录大小写不同而误拒合法路径。
+function pathKey(p: string): string {
+  const resolved = path.resolve(p)
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved
 }
 
 // goal.md §14.4：path.resolve + 前缀白名单，拒绝 .. 穿越。
@@ -35,9 +67,10 @@ export function assertAllowedPath(
   mode: "read" | "write" = "write",
 ): void {
   const resolved = path.resolve(target)
+  const key = pathKey(resolved)
   const ok = roots.some((root) => {
-    const r = path.resolve(root)
-    return resolved === r || resolved.startsWith(r + path.sep)
+    const r = pathKey(root)
+    return key === r || key.startsWith(r + path.sep)
   })
   const projectShaped = /(^|[\\/])\.opencode[\\/]agents([\\/]|$)/.test(resolved)
   if (!ok && !(mode === "read" && projectShaped)) {
@@ -86,7 +119,13 @@ export async function listAgents(dir: string): Promise<AgentSummaryRow[]> {
     } catch {
       continue
     }
-    const parsed = parseAgentFile(content)
+    let parsed: ReturnType<typeof parseAgentFile>
+    try {
+      parsed = parseAgentFile(content)
+    } catch {
+      // 第七轮 R7-1：单个坏文件（未解析别名等）只跳过自己，不能炸掉整次扫描
+      continue
+    }
     // goal.md §5.2：列表只显示 mode 精确等于 subagent 的文件。
     // - primary：主代理本体（如 superpowers.md），不是子代理
     // - all：v1 暂不显示，避免与子代理混淆
@@ -130,10 +169,36 @@ export interface AgentSummaryRow {
 export async function readAgentFile(
   filePath: string,
 ): Promise<{ meta: Record<string, unknown>; body: string; format: "v1" | "v2"; hash: string; mtime: number }> {
-  const content = await fs.readFile(filePath, "utf8")
+  // ENOENT 必须映射成契约错误码 not_found，而不是把裸 ENOENT 抛成 500（第七轮 R7-2）
+  let content: string
+  try {
+    content = await fs.readFile(filePath, "utf8")
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      fail("not_found", `agent file not found: ${filePath}`)
+    }
+    throw err
+  }
   const parsed = parseAgentFile(content)
+  // 未解析别名 / 循环引用：读视图不可信，明确报 invalid_format（第七轮 R7-1）
+  if (parsed.invalid === true) fail("invalid_format", `invalid frontmatter: ${filePath}`)
   const st = await statOr(filePath)
-  return { meta: parsed.meta, body: parsed.body, format: parsed.format, hash: hashOf(content), mtime: st?.mtime ?? 0 }
+  let meta = parsed.meta
+  let body = parsed.body
+  // V1 返回「迁移后等效视图」：prompt 并入正文、model+variant 合并、maxSteps→steps、
+  // permission/tools→permissions。GUI 的编辑器与 patchFromRead 都基于这份视图构造补丁，
+  // 否则保存/开关会用原始 V1 的空正文与缺字段覆盖迁移结果，静默丢提示词/variant/steps/tools deny
+  // （第六轮 C1/C2）。hash 仍是原始文件的 hash（冲突检测基准）；format 保持 v1（保存仍先弹迁移预览）。
+  if (parsed.format === "v1") {
+    try {
+      const effective = parseAgentFile(migrateContent(content).content)
+      meta = effective.meta
+      body = effective.body
+    } catch {
+      // 畸形 YAML：回退原始视图让编辑页能打开；保存时由 invalid_format 明确报错，不会写盘
+    }
+  }
+  return { meta, body, format: parsed.format, hash: hashOf(content), mtime: st?.mtime ?? 0 }
 }
 
 // ---------- 写操作（P2-T4） ----------
@@ -156,14 +221,29 @@ function idToPath(dir: string, id: string): string {
 
 async function assertWritable(filePath: string, roots: readonly string[]): Promise<void> {
   assertAllowedPath(filePath, roots, "write")
-  await fs.mkdir(path.dirname(filePath), { recursive: true })
 }
 
+// 原子写：先写同目录临时文件再 rename 覆盖。中途崩溃/磁盘满不会把原文件截断（第六轮 I2）。
+async function atomicWrite(filePath: string, content: string): Promise<void> {
+  const tmpFile = `${filePath}.tmp-${crypto.randomBytes(6).toString("hex")}`
+  await fs.mkdir(path.dirname(filePath), { recursive: true })
+  await fs.writeFile(tmpFile, content, "utf8")
+  try {
+    await fs.rename(tmpFile, filePath)
+  } catch (err) {
+    await fs.rm(tmpFile, { force: true }).catch(() => {})
+    throw err
+  }
+}
+
+// 只有 ENOENT 才算「不存在」；EBUSY/EACCES 等必须上抛，
+// 否则 create/rename 会把读不了的存在文件当成空位覆盖掉（第六轮 M1）。
 async function readRawOrNull(filePath: string): Promise<string | null> {
   try {
     return await fs.readFile(filePath, "utf8")
-  } catch {
-    return null
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null
+    throw err
   }
 }
 
@@ -176,6 +256,25 @@ async function readRaw(filePath: string): Promise<string> {
 export function timestampStamp(date: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0")
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+}
+
+// 从文件路径反推 agents 根：向上找名为 agents 的目录，取「用户级根或父目录是 .opencode」
+// 的最高有效候选。直接用 dirname(filePath) 会把嵌套代理的回收站放进 agents/ 内部（第六轮 C4）。
+export function agentsRootOf(filePath: string): string {
+  const resolved = path.resolve(filePath)
+  const userRoot = path.resolve(userAgentsDir())
+  const candidates: string[] = []
+  let dir = path.dirname(resolved)
+  for (;;) {
+    if (path.basename(dir) === "agents") candidates.push(dir)
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  const valid = candidates.filter(
+    (d) => pathKey(d) === pathKey(userRoot) || path.basename(path.dirname(d)) === ".opencode",
+  )
+  return valid[valid.length - 1] ?? candidates[0] ?? path.dirname(resolved)
 }
 
 export async function createAgentFile(params: {
@@ -195,14 +294,28 @@ export async function createAgentFile(params: {
   if ((await readRawOrNull(filePath)) !== null) {
     fail("exists", `agent file already exists: ${filePath}`)
   }
-  await fs.writeFile(filePath, createV2Content(params), "utf8")
+  await atomicWrite(filePath, createV2Content(params))
   return filePath
+}
+
+// 回收站目标名去重：同一秒内两个同名文件（如 agents/a/reviewer.md 与 agents/b/reviewer.md）
+// 不能互相覆盖。从原名开始，冲突时在扩展名前依次插入 -1、-2…，最多尝试 100 次（第七轮 R7-4）。
+async function uniqueTarget(trash: string, base: string): Promise<string> {
+  const ext = path.extname(base)
+  const stem = base.slice(0, base.length - ext.length)
+  for (let i = 0; i < 100; i++) {
+    const name = i === 0 ? base : `${stem}-${i}${ext}`
+    const candidate = path.join(trash, name)
+    const exists = await fs.stat(candidate).then(() => true).catch(() => false)
+    if (!exists) return candidate
+  }
+  fail("exists", `cannot find a free trash name for: ${base}`)
 }
 
 async function backupToTrash(filePath: string, agentsDir: string): Promise<string> {
   const trash = trashDirFor(agentsDir)
   await fs.mkdir(trash, { recursive: true })
-  const target = path.join(trash, `.backup-${timestampStamp()}-${path.basename(filePath)}`)
+  const target = await uniqueTarget(trash, `.backup-${timestampStamp()}-${path.basename(filePath)}`)
   await fs.copyFile(filePath, target)
   return target
 }
@@ -220,12 +333,12 @@ export async function updateAgentFile(params: {
   if (currentHash !== params.expectedHash) {
     // goal.md §12.3：不一致即 conflict，绝不静默覆盖；force 时先备份到回收站目录
     if (!params.force) fail("conflict", `file changed on disk: ${params.filePath}`)
-    await backupToTrash(params.filePath, path.dirname(params.filePath))
+    await backupToTrash(params.filePath, agentsRootOf(params.filePath))
   }
   // V1 文件保存 = 整份迁移后再打补丁（goal.md §9.1；GUI 已先弹迁移预览）
   const base = parseAgentFile(raw).format === "v1" ? migrateContent(raw).content : raw
   const content = applyPatchToSource(base, params.patch)
-  await fs.writeFile(params.filePath, content, "utf8")
+  await atomicWrite(params.filePath, content)
   return { hash: hashOf(content) }
 }
 
@@ -243,11 +356,13 @@ export async function setDisabledFile(params: {
   }
   const { frontmatter, body } = splitFrontmatter(raw)
   const doc = frontmatter === null ? new Document() : parseDocument(frontmatter)
+  assertDocSound(doc)
   if (params.disabled) doc.set("disabled", true)
   else doc.delete("disabled")
   const fm = doc.toString().replace(/\n$/, "")
-  const content = `---\n${fm}\n---\n\n${body}`
-  await fs.writeFile(params.filePath, content, "utf8")
+  // 行尾跟随原文件：CRLF 文件开关后仍是 CRLF（第七轮 R7-10）
+  const content = applyEol(`---\n${fm}\n---\n\n${body}`, detectEol(raw))
+  await atomicWrite(params.filePath, content)
   return { hash: hashOf(content) }
 }
 
@@ -271,11 +386,13 @@ export async function renameAgentFile(params: {
   if (parsed.format === "v1" && "name" in parsed.meta) {
     const { frontmatter, body } = splitFrontmatter(raw)
     const doc = frontmatter === null ? new Document() : parseDocument(frontmatter)
+    assertDocSound(doc)
     doc.delete("name")
-    content = `---\n${doc.toString().replace(/\n$/, "")}\n---\n\n${body}`
+    content = applyEol(`---\n${doc.toString().replace(/\n$/, "")}\n---\n\n${body}`, detectEol(raw))
   }
-  if (content !== raw) await fs.writeFile(params.filePath, content, "utf8")
+  // 先改名再写内容：rename 失败时原文件必须原封不动（不能先把 name 删了再失败，第七轮审查）
   await fs.rename(params.filePath, target)
+  if (content !== raw) await atomicWrite(target, content)
   return { path: target }
 }
 
@@ -285,13 +402,12 @@ export async function trashAgentFile(params: {
   roots: readonly string[]
 }): Promise<{ trashPath: string }> {
   await assertWritable(params.filePath, params.roots)
-  const dir = path.dirname(params.filePath)
   const raw = await readRawOrNull(params.filePath)
   if (raw === null) fail("not_found", `agent file not found: ${params.filePath}`)
-  const trash = trashDirFor(dir)
+  const trash = trashDirFor(agentsRootOf(params.filePath))
   await fs.mkdir(trash, { recursive: true })
-  // 文件名：<yyyyMMdd-HHmmss>-<原名>.md（goal.md §10）
-  const target = path.join(trash, `${timestampStamp()}-${path.basename(params.filePath)}`)
+  // 文件名：<yyyyMMdd-HHmmss>-<原名>.md（goal.md §10）；同秒同名追加 -1/-2…（第七轮 R7-4）
+  const target = await uniqueTarget(trash, `${timestampStamp()}-${path.basename(params.filePath)}`)
   await fs.rename(params.filePath, target)
   return { trashPath: target }
 }

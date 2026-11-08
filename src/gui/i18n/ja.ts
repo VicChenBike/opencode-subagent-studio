@@ -55,6 +55,7 @@ export const ja = {
     "editor.invalidId": "名前の形式が不正です",
     "editor.reservedId": "「{{id}}」は予約済みの組み込み ID です",
     "editor.duplicateId": "「{{id}}」は既に存在します",
+    "editor.unchangedId": "新しい ID が現在と同じです",
     "editor.unsaved.title": "未保存の変更",
     "editor.unsaved.desc": "変更が保存されていません。このまま離れますか？",
     "editor.nameReadonly": "名前を変更するとエージェント ID が変わります。慎重に操作してください。",
@@ -104,4 +105,8 @@ export const ja = {
     "error.exists": "同じ名前のファイルが既に存在します",
     "error.notFound": "ファイルが見つかりません",
     "error.conflict": "ファイルが他で変更されました",
+    "error.invalidId": "エージェント ID の形式が無効です",
+    "error.reservedId": "この ID は予約されています",
+    "error.migrationRequired": "この旧形式ファイルは切り替え前に移行が必要です",
+    "error.invalidFormat": "frontmatter の形式が不正です。保存前に YAML を修正してください",
 } as const

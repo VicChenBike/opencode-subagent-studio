@@ -1,7 +1,8 @@
 // src/gui/i18n/index.ts —— 聚合所有语言词典，导出宿主 catalog。
-// en 必填（宿主兜底）：宿主按 `i18n.en ?? {}` 读取 en，其他语言按 {...en, ...locale}
-// 合并注册，缺键自动回退 en。宿主没有区域回退链，catalog 键必须是宿主界面语言的
-// 精确短码（zh / fr / es / br / ru / ar / de / ja / hi / ko）。
+// en 必填（宿主兜底）：宿主按 `i18n.en ?? {}` 读取 en，并用 en 填充其他语言缺失的键
+// （官方 GUI 文档：Write every locale inline; English fills every key a locale lacks），
+// 因此本目录只注册各语言自己的词典，不手工合并。宿主没有区域回退链，catalog 键必须是
+// 宿主界面语言的精确短码（zh / fr / es / br / ru / ar / de / ja / hi / ko）。
 // import 带显式 .ts 扩展名：测试经 node --experimental-strip-types 加载本模块，要求显式扩展。
 import { en } from "./en.ts"
 import { zh } from "./zh.ts"

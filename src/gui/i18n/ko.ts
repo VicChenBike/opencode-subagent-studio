@@ -55,6 +55,7 @@ export const ko = {
     "editor.invalidId": "이름 형식이 잘못되었습니다",
     "editor.reservedId": "\"{{id}}\"은(는) 예약된 내장 ID입니다",
     "editor.duplicateId": "\"{{id}}\"은(는) 이미 존재합니다",
+    "editor.unchangedId": "새 ID가 현재 ID와 같습니다",
     "editor.unsaved.title": "저장되지 않은 변경 사항",
     "editor.unsaved.desc": "변경 사항이 저장되지 않았습니다. 그래도 나가시겠습니까?",
     "editor.nameReadonly": "이름을 변경하면 에이전트 ID가 바뀝니다. 신중하게 사용하세요.",
@@ -104,4 +105,8 @@ export const ko = {
     "error.exists": "같은 이름의 파일이 이미 존재합니다",
     "error.notFound": "파일을 찾을 수 없습니다",
     "error.conflict": "파일이 다른 곳에서 변경되었습니다",
+    "error.invalidId": "에이전트 ID 형식이 잘못되었습니다",
+    "error.reservedId": "이 ID는 예약되어 있습니다",
+    "error.migrationRequired": "이 레거시 파일은 전환 전에 마이그레이션해야 합니다",
+    "error.invalidFormat": "frontmatter 형식이 잘못되었습니다. 저장 전에 YAML을 수정하세요",
 } as const

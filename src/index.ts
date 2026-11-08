@@ -2,6 +2,7 @@
 // 改动本文件后必须重启 OpenCode Desktop 才生效（AGENTS.md §4.7）。
 import { Plugin } from "@opencode/plugin"
 import path from "node:path"
+import fs from "node:fs/promises"
 import { Subagents, ACTIONS } from "./rpc.ts"
 import type {
   AgentSummary, ListOutput, ReadOutput, CreateOutput, UpdateOutput, RemoveOutput,
@@ -11,13 +12,13 @@ import type {
 import {
   userAgentsDir, projectAgentsDir, listAgents, readAgentFile, assertAllowedPath,
   createAgentFile, updateAgentFile, setDisabledFile, renameAgentFile, trashAgentFile,
-  previewMigrationFile,
+  previewMigrationFile, assertProjectRootExists, resolveAgentsDir,
 } from "./core/agent-store.ts"
 import { migratePreview } from "./core/frontmatter.ts"
 import { runWithDeclaredErrors } from "./core/rpc-errors.ts"
 import { createChangeDebouncer, watchAgentsDir } from "./core/watch.ts"
 import {
-  applyBuiltinOverrideToCache, BUILTIN_IDS, createBuiltinTransform, overrideKeyOf,
+  BUILTIN_IDS, createBuiltinTransform, overrideKeyOf, writeBuiltinOverride, isValidBuiltinModel,
 } from "./core/builtin.ts"
 import type { OverrideCache } from "./core/builtin.ts"
 import type { AgentsWatcher } from "./core/watch.ts"
@@ -29,10 +30,11 @@ function defaultMatrixActions(): PermissionMatrix["actions"] {
 
 // update / setDisabled / rename / remove 只拿到绝对路径，无法反推 scope：
 // write 白名单 = 用户级根 + 该路径所在 <项目根>/.opencode/agents
+// marker 查找大小写不敏感：win32 下盘符/目录大小写不同也要能反推出项目根（第七轮 R7-13）。
 function rootsForScopeOf(filePath: string): string[] {
   const resolved = path.resolve(filePath)
   const marker = `${path.sep}.opencode${path.sep}agents`
-  const idx = resolved.lastIndexOf(marker)
+  const idx = resolved.toLowerCase().lastIndexOf(marker.toLowerCase())
   if (idx !== -1) {
     return [userAgentsDir(), projectAgentsDir(resolved.slice(0, idx))]
   }
@@ -52,7 +54,11 @@ export default Plugin.define({
     const overrideCache: OverrideCache = new Map()
     for (const id of BUILTIN_IDS) {
       const value = await ctx.storage.get(overrideKeyOf(id))
-      if (typeof value === "string" && value.length > 0) overrideCache.set(overrideKeyOf(id), value)
+      // storage 里可能残留旧版本写入的非法值：不校验会让坏值既显示在列表、又进入 transform 缓存
+      // （第七轮 R7-7 的读取侧对称加固）。
+      if (typeof value === "string" && value.length > 0 && isValidBuiltinModel(value)) {
+        overrideCache.set(overrideKeyOf(id), value)
+      }
     }
 
     const readBuiltinOverrides = (): BuiltinOverridesOutput => {
@@ -62,16 +68,6 @@ export default Plugin.define({
         if (value !== undefined) out[id] = value
       }
       return out
-    }
-
-    // 同步改缓存（transform 立刻能看到），storage 的写入并行进行。
-    const writeBuiltinOverride = async (id: (typeof BUILTIN_IDS)[number], model?: string): Promise<void> => {
-      applyBuiltinOverrideToCache(overrideCache, id, model)
-      if (model === undefined || model === "") {
-        await ctx.storage.remove(overrideKeyOf(id))
-        return
-      }
-      await ctx.storage.set(overrideKeyOf(id), model)
     }
 
     // transform 在每次 agent 重载后重放：同步读缓存并注入
@@ -95,7 +91,8 @@ export default Plugin.define({
     const reg = await ctx.rpc.register(Subagents, {
       list: async (input, context): Promise<ListOutput | unknown> => runWithDeclaredErrors(context as unknown as ErrorContextLike, async () => {
         const q = input as { scope: "user" | "project"; projectPath?: string }
-        const dir = q.scope === "project" && q.projectPath ? projectAgentsDir(q.projectPath) : userAgentsDir()
+        // project 缺 projectPath 时 resolveAgentsDir 直接返回 invalid_path，不再静默降级（第七轮 R7-6）
+        const dir = resolveAgentsDir(q.scope, q.projectPath)
         // AgentSummaryRow 与 rpc.AgentSummary 结构逐字段一致
         const agents: AgentSummary[] = await listAgents(dir)
         // 内置代理固定两项，带上当前覆盖值（无覆盖则不写 model，GUI 显示「继承默认」）
@@ -120,7 +117,10 @@ export default Plugin.define({
           description: string; body: string; model?: string; color?: string
           hidden?: boolean; steps?: number; matrix?: PermissionMatrix
         }
-        const dir = q.scope === "project" && q.projectPath ? projectAgentsDir(q.projectPath) : userAgentsDir()
+        const dir = resolveAgentsDir(q.scope, q.projectPath)
+        // 项目根必须已存在，杜绝在伪造路径下创建目录树（第六轮 I4）
+        // resolveAgentsDir 已保证 project 作用域下 projectPath 非空（第七轮 R7-6）
+        if (q.scope === "project") await assertProjectRootExists(q.projectPath as string)
         const filePath = await createAgentFile({
           dir,
           id: q.id,
@@ -203,7 +203,11 @@ export default Plugin.define({
           if (!(BUILTIN_IDS as readonly string[]).includes(q.id)) {
             return (context as unknown as ErrorContextLike).error("invalid_id", `not a builtin: ${q.id}`, {})
           }
-          await writeBuiltinOverride(q.id, q.model)
+          // 非法模型引用必须在落 storage 前拒绝，否则坏值会进 transform 缓存（第七轮 R7-7）
+          if (!isValidBuiltinModel(q.model)) {
+            return (context as unknown as ErrorContextLike).error("invalid_id", `invalid model ref: ${String(q.model)}`, {})
+          }
+          await writeBuiltinOverride(ctx.storage, overrideCache, q.id, q.model)
           await ctx.agent.reload()
           await reg.events.emit("changed", {})
           return {}
@@ -222,7 +226,11 @@ export default Plugin.define({
         projectWatcher?.close()
         projectWatcher = null
         if (q.projectPath) {
-          projectWatcher = watchAgentsDir(projectAgentsDir(q.projectPath), () => changeDebouncer.trigger(), { delayMs: 0 })
+          // 项目根不存在时不启动监听，也不 mkdir 伪造路径（第六轮 I4）
+          const rootExists = await fs.stat(q.projectPath).then((st) => st.isDirectory()).catch(() => false)
+          if (rootExists) {
+            projectWatcher = watchAgentsDir(projectAgentsDir(q.projectPath), () => changeDebouncer.trigger(), { delayMs: 0 })
+          }
         }
         return {}
       },

@@ -73,6 +73,7 @@ export type ErrorCode =
   | "not_found"
   | "conflict"
   | "migration_required"
+  | "invalid_format"
 
 export interface ListInput { scope: "user" | "project"; projectPath?: string }
 export interface ListOutput { agents: AgentSummary[]; builtins: BuiltinSummary[] }
@@ -140,6 +141,7 @@ export const Subagents = Rpc.define({
         required: ["agents", "builtins"],
         additionalProperties: false,
       },
+      errors: { invalid_path: NO_DATA },
     },
     read: {
       input: { type: "object", properties: { path: str }, required: ["path"], additionalProperties: false },
@@ -149,6 +151,7 @@ export const Subagents = Rpc.define({
         required: ["meta", "body", "format", "hash", "mtime"],
         additionalProperties: false,
       },
+      errors: { invalid_path: NO_DATA, not_found: NO_DATA, invalid_format: NO_DATA },
     },
     create: {
       input: {
@@ -171,7 +174,7 @@ export const Subagents = Rpc.define({
         additionalProperties: false,
       },
       output: { type: "object", properties: { hash: str }, required: ["hash"], additionalProperties: false },
-      errors: { invalid_path: NO_DATA, not_found: NO_DATA, conflict: NO_DATA },
+      errors: { invalid_path: NO_DATA, not_found: NO_DATA, conflict: NO_DATA, invalid_format: NO_DATA },
     },
     remove: {
       input: { type: "object", properties: { path: str }, required: ["path"], additionalProperties: false },
@@ -181,12 +184,12 @@ export const Subagents = Rpc.define({
     rename: {
       input: { type: "object", properties: { path: str, newId: str }, required: ["path", "newId"], additionalProperties: false },
       output: { type: "object", properties: { path: str }, required: ["path"], additionalProperties: false },
-      errors: { invalid_path: NO_DATA, invalid_id: NO_DATA, reserved_id: NO_DATA, exists: NO_DATA, not_found: NO_DATA },
+      errors: { invalid_path: NO_DATA, invalid_id: NO_DATA, reserved_id: NO_DATA, exists: NO_DATA, not_found: NO_DATA, invalid_format: NO_DATA },
     },
     setDisabled: {
       input: { type: "object", properties: { path: str, disabled: bool }, required: ["path", "disabled"], additionalProperties: false },
       output: { type: "object", properties: { hash: str }, required: ["hash"], additionalProperties: false },
-      errors: { invalid_path: NO_DATA, not_found: NO_DATA, migration_required: NO_DATA },
+      errors: { invalid_path: NO_DATA, not_found: NO_DATA, migration_required: NO_DATA, invalid_format: NO_DATA },
     },
     models: {
       input: { type: "object", properties: {}, additionalProperties: false },
@@ -240,7 +243,7 @@ export const Subagents = Rpc.define({
         required: ["before", "after", "changes"],
         additionalProperties: false,
       },
-      errors: { invalid_path: NO_DATA, not_found: NO_DATA },
+      errors: { invalid_path: NO_DATA, not_found: NO_DATA, invalid_format: NO_DATA },
     },
     watchProject: {
       input: { type: "object", properties: { projectPath: str }, additionalProperties: false },

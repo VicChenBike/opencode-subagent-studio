@@ -57,6 +57,7 @@ export const ar = {
     "editor.invalidId": "تنسيق الاسم غير صالح",
     "editor.reservedId": "«{{id}}» معرّف مدمج محجوز",
     "editor.duplicateId": "«{{id}}» موجود بالفعل",
+    "editor.unchangedId": "المعرّف الجديد مطابق للحالي",
     "editor.unsaved.title": "تغييرات غير محفوظة",
     "editor.unsaved.desc": "التغييرات غير محفوظة. الخروج على أي حال؟",
     "editor.nameReadonly": "إعادة التسمية تغيّر معرّف الوكيل. استخدمها بحذر.",
@@ -106,4 +107,8 @@ export const ar = {
     "error.exists": "يوجد ملف بهذا الاسم بالفعل",
     "error.notFound": "الملف غير موجود",
     "error.conflict": "عُدّل الملف من مكان آخر",
+    "error.invalidId": "تنسيق معرّف الوكيل غير صالح",
+    "error.reservedId": "هذا المعرّف محجوز",
+    "error.migrationRequired": "يجب ترحيل هذا الملف القديم قبل تبديل المفتاح",
+    "error.invalidFormat": "الـ frontmatter تالف؛ أصلح YAML قبل الحفظ",
 } as const

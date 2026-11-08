@@ -56,6 +56,11 @@ test("rulesFromMatrix generates canonical order (goal.md §8.3)", () => {
     rule("skill", "*", "allow"),
     rule("subagent", "*", "allow"),
     rule("question", "*", "allow"),
+    // 第七轮 R7-9：read 与文件原值（缺省 allow）一致 → .env 默认保护保留；
+    // 旧行为拿 read 与 defaultEffect 比较，只改默认档就会误删保护。
+    rule("read", "*.env", "ask"),
+    rule("read", "*.env.*", "ask"),
+    rule("read", "*.env.example", "allow"),
   ])
 })
 

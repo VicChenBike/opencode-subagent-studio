@@ -134,9 +134,17 @@ export function watchAgentsDir(
     }
   }
 
+  // EventEmitter 的 'error' 事件未处理会直接抛崩进程；watcher 出错只记录并继续（第七轮审查）
+  watcher.on("error", (error) => {
+    console.error("[subagent-manager] agents watcher error:", dir, error)
+  })
+
   return {
     close: () => {
       debouncer.dispose()
+      // 只摘 change 监听、保留 error 处理器：removeAllListeners() 会把上面那个处理器一起摘掉，
+      // 若 close 期间仍偶发 'error'，就会变成未处理事件直接崩进程（第七轮补充修复）。
+      watcher.removeAllListeners("change")
       watcher.close()
     },
   }

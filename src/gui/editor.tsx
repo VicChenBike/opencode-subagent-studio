@@ -100,7 +100,8 @@ export function EditorPage(props: {
       description: description(),
       stepsText: stepsText(),
       existingIds: props.existingIds(),
-      loading: loading(),
+      // 加载失败时禁止保存：否则 expectedHash 是 undefined，只会得到 schema 错误（第六轮 M8）
+      loading: loading() || loadError() !== undefined,
     }),
   )
 

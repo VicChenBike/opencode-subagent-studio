@@ -55,6 +55,7 @@ export const fr = {
     "editor.invalidId": "Format de nom invalide",
     "editor.reservedId": "« {{id}} » est un identifiant intégré réservé",
     "editor.duplicateId": "« {{id}} » existe déjà",
+    "editor.unchangedId": "Le nouvel identifiant est identique à l'actuel",
     "editor.unsaved.title": "Modifications non enregistrées",
     "editor.unsaved.desc": "Les modifications ne sont pas enregistrées. Quitter quand même ?",
     "editor.nameReadonly": "Renommer change l'identifiant de l'agent. À utiliser avec précaution.",
@@ -104,4 +105,8 @@ export const fr = {
     "error.exists": "Un fichier portant ce nom existe déjà",
     "error.notFound": "Fichier introuvable",
     "error.conflict": "Le fichier a été modifié ailleurs",
+    "error.invalidId": "Format d'identifiant d'agent invalide",
+    "error.reservedId": "Cet identifiant est réservé",
+    "error.migrationRequired": "Ce fichier legacy doit être migré avant de basculer l'interrupteur",
+    "error.invalidFormat": "Le frontmatter est malformé ; corrigez le YAML avant d'enregistrer",
 } as const

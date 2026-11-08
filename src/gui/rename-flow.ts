@@ -35,7 +35,9 @@ export function renameConfirmCopy(
 export function validateNewId(newId: string, currentId: string): NewIdError | undefined {
   if (!isValidAgentId(newId)) return "invalid"
   if (isReservedId(newId)) return "reserved"
-  if (newId === currentId) return "unchanged"
+  // 嵌套代理（team/reviewer）的输入框预填 basename；与 basename 相同同样算未改变（第七轮 R7-3）
+  const currentBase = currentId.includes("/") ? currentId.slice(currentId.lastIndexOf("/") + 1) : currentId
+  if (newId === currentId || newId === currentBase) return "unchanged"
   return undefined
 }
 
@@ -67,6 +69,7 @@ function invalidCopyKey(
 ): string {
   if (invalid === "invalid") return t("editor.invalidId")
   if (invalid === "reserved") return t("editor.reservedId", { id: newId })
+  if (invalid === "unchanged") return t("editor.unchangedId")
   return t("editor.duplicateId", { id: newId })
 }
 
@@ -115,11 +118,19 @@ export async function renameAgentWithPrompt(
 ): Promise<RenameResult> {
   const ok = await deps.confirm(renameConfirmCopy(deps.t, agent.id))
   if (!ok) return "cancelled"
+  // 嵌套 ID 预填 basename：完整嵌套 ID 不符合扁平 ID 校验，重命名仍留在原子目录（文档化限制）
+  const prefill = agent.id.includes("/") ? agent.id.slice(agent.id.lastIndexOf("/") + 1) : agent.id
   const next = await deps.prompt({
     title: deps.t("editor.rename.title"),
     placeholder: deps.t("editor.name.hint"),
-    value: agent.id,
+    value: prefill,
   })
   if (next === undefined) return "cancelled"
+  // 前置校验不能绕过（第六轮 I5）：非法/保留/未改变在本地拦截，不发 RPC
+  const invalid = validateNewId(next, agent.id)
+  if (invalid !== undefined) {
+    deps.toast({ title: invalidCopyKey(invalid, deps.t, next), variant: "error" })
+    return "invalid"
+  }
   return renameConfirmed(deps, agent, next)
 }

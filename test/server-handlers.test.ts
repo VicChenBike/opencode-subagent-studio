@@ -298,10 +298,11 @@ body
   const { modelRefFromRead, buildPatch } = await import("../src/gui/editor-form.ts")
   const file = path.join(dir, "legacy.md")
 
-  // 1. read：GUI 拿到的 meta 里 model 与 variant 是分开的
+  // 1. read：第六轮 C1/C2 起返回迁移后等效视图——model 已合并 #high，variant 字段不再出现
   const res = await readAgentFile(file)
   assert.equal(res.format, "v1")
-  assert.equal((res.meta as Record<string, unknown>).variant, "high")
+  assert.equal((res.meta as Record<string, unknown>).model, "acme/standard#high")
+  assert.ok(!("variant" in (res.meta as Record<string, unknown>)), "effective view has no separate variant")
 
   // 2. GUI 还原模型引用（修复点）：base ref + 独立 variant
   const ref = modelRefFromRead(res.meta as Record<string, unknown>, res.format)

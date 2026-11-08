@@ -56,6 +56,7 @@ export const es = {
     "editor.invalidId": "Formato de nombre no válido",
     "editor.reservedId": "«{{id}}» es un ID integrado reservado",
     "editor.duplicateId": "«{{id}}» ya existe",
+    "editor.unchangedId": "El nuevo ID es igual al actual",
     "editor.unsaved.title": "Cambios sin guardar",
     "editor.unsaved.desc": "Los cambios no se han guardado. ¿Salir de todos modos?",
     "editor.nameReadonly": "Renombrar cambia el ID del agente. Úsalo con cuidado.",
@@ -105,4 +106,8 @@ export const es = {
     "error.exists": "Ya existe un archivo con este nombre",
     "error.notFound": "Archivo no encontrado",
     "error.conflict": "El archivo fue modificado en otro lugar",
+    "error.invalidId": "Formato de ID de agente no válido",
+    "error.reservedId": "Este ID está reservado",
+    "error.migrationRequired": "Este archivo heredado debe migrarse antes de cambiar el interruptor",
+    "error.invalidFormat": "El frontmatter tiene formato incorrecto; corrija el YAML antes de guardar",
 } as const

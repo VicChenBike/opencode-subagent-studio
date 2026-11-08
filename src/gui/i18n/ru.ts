@@ -56,6 +56,7 @@ export const ru = {
     "editor.invalidId": "Неверный формат имени",
     "editor.reservedId": "«{{id}}» — зарезервированный встроенный ID",
     "editor.duplicateId": "«{{id}}» уже существует",
+    "editor.unchangedId": "Новый ID совпадает с текущим",
     "editor.unsaved.title": "Несохранённые изменения",
     "editor.unsaved.desc": "Изменения не сохранены. Всё равно выйти?",
     "editor.nameReadonly": "Переименование меняет ID агента. Используйте с осторожностью.",
@@ -105,4 +106,8 @@ export const ru = {
     "error.exists": "Файл с таким именем уже существует",
     "error.notFound": "Файл не найден",
     "error.conflict": "Файл был изменён другим процессом",
+    "error.invalidId": "Неверный формат ID агента",
+    "error.reservedId": "Этот ID зарезервирован",
+    "error.migrationRequired": "Этот устаревший файл нужно мигрировать перед переключением",
+    "error.invalidFormat": "Frontmatter повреждён; исправьте YAML перед сохранением",
 } as const

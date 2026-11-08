@@ -172,13 +172,8 @@ export function createInputOf(params: {
 
 /**
  * 判断一次保存失败是否是「文件已被外部修改」的冲突（goal.md §12.3）。
- *
- * 宿主真实形态（客户端 readError 的产物）是 `{ type, message }`，且只有该错误码被契约
- * 声明过时才原样透出；否则会被包成 `rpc.internal`。桌面端实测过服务端 throw 导致
- * conflict 变成 500 的情形，所以这里同时容忍：
- * - 顶层 type 命中
- * - type 藏在 data / cause 里
- * - Error 实例的 message 含 conflict（向后兼容旧行为）
+ * 只认契约错误码 type === "conflict"（顶层或藏在 data / cause 里）。
+ * 不再用 message 含 "conflict" 的子串兜底——名为 conflict.md 的文件 not_found 会被误判（第六轮 M2）。
  */
 export function isConflictError(error: unknown): boolean {
   if (error === null || error === undefined) return false
@@ -186,7 +181,6 @@ export function isConflictError(error: unknown): boolean {
     if (value === null || typeof value !== "object" || depth > 3) return false
     const obj = value as Record<string, unknown>
     if (obj.type === "conflict") return true
-    if (typeof obj.message === "string" && obj.message.includes("conflict")) return true
     return hit(obj.data, depth + 1) || hit(obj.cause, depth + 1)
   }
   return hit(error, 0)

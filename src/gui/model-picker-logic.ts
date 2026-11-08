@@ -24,6 +24,15 @@ export function filterProviders(
 }
 
 /** "provider/model" → provider 部分；无 "/" 视为非法。model id 可含 "/"，按首个 "/" 切。 */
+// 重选当前已选模型时保留其 variant；换模型才清空（第六轮 M3）。
+export function variantOnPick(
+  picked: string,
+  current: string | undefined,
+  currentVariant: string | undefined,
+): string | undefined {
+  return picked === current ? currentVariant : undefined
+}
+
 export function providerOfModel(model: string | undefined): string | undefined {
   if (!model) return undefined
   const slash = model.indexOf("/")

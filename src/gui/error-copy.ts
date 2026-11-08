@@ -3,12 +3,16 @@
 // 服务端把可预期的失败作为契约错误返回（`{ type, message }`）。直接把 message 抛给用户
 // 会看到英文内部措辞，所以已知错误码优先映射成 i18n 文案，其余保留原始 message。
 
-/** 有专门文案的错误码。其余（invalid_id / reserved_id / migration_required）走原始 message。 */
+/** 全部契约错误码都有专门文案（第六轮 M9）；未知码才回退原始 message。 */
 const COPY_KEYS: Record<string, string> = {
   invalid_path: "error.invalidPath",
+  invalid_id: "error.invalidId",
+  reserved_id: "error.reservedId",
   exists: "error.exists",
   not_found: "error.notFound",
   conflict: "error.conflict",
+  migration_required: "error.migrationRequired",
+  invalid_format: "error.invalidFormat",
 }
 
 /**
