@@ -1,5 +1,7 @@
 # Contributing to opencode-subagent-studio
 
+English | [简体中文](CONTRIBUTING.zh-CN.md)
+
 Thanks for your interest in contributing! This document covers everything you need to get started.
 
 ## Development setup
