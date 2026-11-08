@@ -44,6 +44,16 @@
 
 ## 安装
 
+本插件已发布到 npm：[`opencode-subagent-studio`](https://www.npmjs.com/package/opencode-subagent-studio)。最简安装是在 `opencode.jsonc` 的 `plugins` 数组里写包名——OpenCode 会自动下载并缓存：
+
+```jsonc
+{
+  "plugins": ["opencode-subagent-studio"]
+}
+```
+
+下面的步骤是从本地克隆安装的方式。
+
 1. 把仓库克隆到插件目录，然后安装并构建。如果你已有该目录，跳过克隆，直接在文件夹里执行下面三条命令。
 
 ```bash

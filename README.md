@@ -44,6 +44,16 @@ Manage OpenCode V2 subagents from the desktop app: a settings page to view, crea
 
 ## Install
 
+The plugin is published on npm as [`opencode-subagent-studio`](https://www.npmjs.com/package/opencode-subagent-studio). The quickest install is to list the package name in the `plugins` array of `opencode.jsonc` — OpenCode downloads and caches it automatically:
+
+```jsonc
+{
+  "plugins": ["opencode-subagent-studio"]
+}
+```
+
+The steps below install from a local clone instead.
+
 1. Clone the repository into the plugins directory, then install and build. If you already have this folder, skip the clone and run the three commands inside it.
 
 ```bash
